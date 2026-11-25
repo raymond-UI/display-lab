@@ -189,8 +189,10 @@ mod host {
             let mode_alloc: Allocated<AnyObject> = msg_send![mode_cls, alloc];
             let mode: Option<Retained<AnyObject>> = msg_send![
                 mode_alloc,
-                initWithWidth: a.width as usize,
-                height: a.height as usize,
+                // unsigned int, not NSUInteger: checked on macOS 26 by
+                // objc2's runtime encoding assertions.
+                initWithWidth: a.width,
+                height: a.height,
                 refreshRate: a.refresh
             ];
             let mode = mode.ok_or("could not create the display mode")?;
