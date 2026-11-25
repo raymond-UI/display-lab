@@ -61,6 +61,7 @@ jobs:
   macos-virtual-screen:
     runs-on: macos-latest
     continue-on-error: true
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -94,6 +95,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      - run: cargo build --workspace
       - name: Catalogue passes against a good app
         shell: bash
         run: ./target/debug/displaylab.exe run --backend fake scenarios/catalogue/*.toml scenarios/fake-presenter/*.toml
@@ -103,6 +105,7 @@ jobs:
   windows-display-driver:
     runs-on: windows-latest
     continue-on-error: true
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Probe

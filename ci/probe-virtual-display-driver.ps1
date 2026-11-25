@@ -35,22 +35,55 @@ Get-ChildItem -Recurse $work -Include *.cat | Select-Object -First 3 | ForEach-O
     (Get-AuthenticodeSignature $_.FullName) | Format-List Status, StatusMessage, SignerCertificate
 }
 
-"== Install with the project's own script, if the release ships one"
-$script = Get-ChildItem -Recurse $work -Filter 'virtual-driver-manager.ps1' | Select-Object -First 1
-if ($script) {
-    & $script.FullName -Action install -Silent -Json
-} else {
-    "no virtual-driver-manager.ps1 in the release; trying pnputil on the INF"
-    $inf = Get-ChildItem -Recurse $work -Filter *.inf | Select-Object -First 1
-    if ($inf) {
-        pnputil /add-driver $inf.FullName /install
-        # An IddCx driver is root-enumerated: the device node has to be
-        # created, which pnputil can do on recent Windows.
-        pnputil /add-device "Root\MttVDD" 2>&1
+# Every install attempt runs in a child process with a deadline. The first
+# run of this probe hung with no output: something in the install waited on
+# a prompt nobody can answer. A deadline turns that into an answer.
+function Run-WithDeadline([string]$label, [string]$command, [int]$seconds) {
+    "-- $label (deadline $seconds s)"
+    $out = Join-Path $work "$label.out.txt"
+    $err = Join-Path $work "$label.err.txt"
+    $p = Start-Process -FilePath powershell.exe -ArgumentList '-NoProfile', '-NonInteractive', '-Command', $command `
+        -RedirectStandardOutput $out -RedirectStandardError $err -PassThru -NoNewWindow
+    if (-not $p.WaitForExit($seconds * 1000)) {
+        "HUNG after $seconds s. Windows with a title at that moment:"
+        Get-Process | Where-Object { $_.MainWindowTitle } | Format-Table -AutoSize Id, ProcessName, MainWindowTitle
+        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
     } else {
-        "no INF found"
+        "exit code $($p.ExitCode)"
     }
+    Get-Content $out -ErrorAction SilentlyContinue
+    Get-Content $err -ErrorAction SilentlyContinue
 }
+
+# The x64 build is the folder the release calls "x86".
+$driverDir = Get-ChildItem -Recurse -Directory $work -Filter 'VirtualDisplayDriver' |
+    Where-Object { $_.FullName -like '*x86.Driver.Only*' } | Select-Object -First 1
+$inf = Get-ChildItem $driverDir.FullName -Filter *.inf | Select-Object -First 1
+$cat = Get-ChildItem $driverDir.FullName -Filter *.cat | Select-Object -First 1
+$devcon = Get-ChildItem -Recurse $work -Filter devcon.exe | Select-Object -First 1
+"INF: $($inf.FullName)"
+"devcon: $($devcon.FullName)"
+
+"== Driver settings shipped with the release (monitor count, EDID, modes)"
+Get-Content (Join-Path $driverDir.FullName 'vdd_settings.xml')
+
+"== Trust the driver's publisher"
+# The first run hung inside pnputil: a driver signed by anyone other than
+# Microsoft asks "Would you like to install this device software?" unless
+# its publisher is already trusted. Trusting it first removes the prompt.
+$signer = (Get-AuthenticodeSignature $cat.FullName).SignerCertificate
+$certFile = Join-Path $work 'vdd-signer.cer'
+Export-Certificate -Cert $signer -FilePath $certFile | Out-Null
+Import-Certificate -FilePath $certFile -CertStoreLocation Cert:\LocalMachine\TrustedPublisher | Format-List Subject, Thumbprint
+
+"== Install"
+Run-WithDeadline 'devcon-install' "& '$($devcon.FullName)' install '$($inf.FullName)' 'Root\MttVDD'" 180
+
+"== Where the driver reads its settings"
+foreach ($path in @('C:\VirtualDisplayDriver\vdd_settings.xml', 'C:\IddSampleDriver\option.txt')) {
+    if (Test-Path $path) { "found $path"; Get-Content $path }
+}
+Get-ItemProperty -Path 'HKLM:\SOFTWARE\MikeTheTech\VirtualDisplayDriver' -ErrorAction SilentlyContinue | Format-List
 
 Start-Sleep -Seconds 10
 "== Display devices"
