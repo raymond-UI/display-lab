@@ -1,0 +1,51 @@
+name = "stage-monitor-drops"
+description = """
+The stage monitor loses its signal. The audience screen must keep showing
+content and keep following input, and the stage monitor must recover when it
+comes back.
+"""
+
+[[screens]]
+id = "laptop"
+profile = "laptop-1080p"
+host = true
+
+[[screens]]
+id = "projector"
+profile = "hd-projector"
+
+[[screens]]
+id = "stage"
+profile = "stage-monitor"
+
+[[steps]]
+step = "launch"
+
+[[steps]]
+step = "expect_content"
+screen = "projector"
+
+[[steps]]
+step = "expect_content"
+screen = "stage"
+
+[[steps]]
+step = "unplug"
+screen = "stage"
+
+[[steps]]
+step = "input"
+action = "next"
+
+[[steps]]
+step = "expect_changed"
+screen = "projector"
+
+[[steps]]
+step = "plug"
+screen = "stage"
+
+[[steps]]
+step = "expect_content"
+screen = "stage"
+within_ms = 5000

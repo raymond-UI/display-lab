@@ -1,0 +1,48 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/lab-core",
+    "crates/lab-compare",
+    "crates/lab-adapter",
+    "crates/lab-fake",
+    "crates/lab-runner",
+    "crates/lab-mac",
+    "crates/lab-win",
+    "crates/displaylab",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.87"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+lab-core = { path = "crates/lab-core" }
+lab-compare = { path = "crates/lab-compare" }
+lab-adapter = { path = "crates/lab-adapter" }
+lab-fake = { path = "crates/lab-fake" }
+lab-runner = { path = "crates/lab-runner" }
+lab-mac = { path = "crates/lab-mac" }
+lab-win = { path = "crates/lab-win" }
+
+anyhow = "1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+png = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+toml = "0.8"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+
+[profile.dev]
+# Frame compare is hot even in tests; unoptimised SSIM on a 1080p frame is slow.
+opt-level = 1

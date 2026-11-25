@@ -1,0 +1,38 @@
+name = "virtual-screen"
+description = """
+The smallest real-backend check: plug one virtual screen, capture it, see
+something on it (the desktop wallpaper is enough). Uses the Python template
+adapter, which drives no real app. CI runs this to prove a runner can create
+and capture virtual screens at all.
+"""
+
+[[screens]]
+id = "host"
+profile = "laptop-1080p"
+host = true
+
+[[screens]]
+id = "projector"
+profile = "hd-projector"
+
+[[steps]]
+step = "launch"
+
+[[steps]]
+step = "expect_content"
+screen = "projector"
+within_ms = 15000
+
+[[steps]]
+step = "unplug"
+screen = "projector"
+
+[[steps]]
+step = "plug"
+screen = "projector"
+mode = "1280x720"
+
+[[steps]]
+step = "expect_content"
+screen = "projector"
+within_ms = 15000

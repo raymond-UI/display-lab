@@ -1,0 +1,12 @@
+name = "stage-monitor"
+description = "A 1080p confidence monitor facing the stage."
+
+[identity]
+vendor = 0x1D10
+product = 0x0900
+serial = 4001
+name = "Lab Stage Monitor"
+
+[[modes]]
+width = 1920
+height = 1080

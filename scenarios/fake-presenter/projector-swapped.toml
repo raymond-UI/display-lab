@@ -1,0 +1,48 @@
+name = "projector-swapped"
+description = """
+The venue swaps in another projector of the same model. The fake presenter,
+like a careful real app, binds by identity: the stranger is not adopted, and it shows
+nothing until someone configures it.
+"""
+
+[[screens]]
+id = "laptop"
+profile = "laptop-1080p"
+host = true
+
+[[screens]]
+id = "projector"
+profile = "hd-projector"
+
+[[screens]]
+id = "spare"
+profile = "hd-projector-spare"
+plugged = false
+
+[[steps]]
+step = "launch"
+
+[[steps]]
+step = "expect_bound"
+output = "audience"
+screen = "projector"
+
+[[steps]]
+step = "unplug"
+screen = "projector"
+
+[[steps]]
+step = "plug"
+screen = "spare"
+
+[[steps]]
+step = "wait"
+ms = 500
+
+[[steps]]
+step = "expect_unbound"
+output = "audience"
+
+[[steps]]
+step = "expect_blank"
+screen = "spare"

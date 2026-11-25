@@ -1,0 +1,16 @@
+[package]
+name = "lab-compare"
+description = "Frame comparison for Display Lab: SSIM plus a CIE76 deltaE budget, blank and change checks, PNG IO."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+lab-core.workspace = true
+png.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

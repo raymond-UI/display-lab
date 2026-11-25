@@ -1,0 +1,12 @@
+name = "laptop-1080p"
+description = "The machine's own panel. On a real backend this is whatever is built in; the profile only names it."
+
+[identity]
+vendor = 0x0610
+product = 0xA001
+serial = 1
+name = "Built-in Display"
+
+[[modes]]
+width = 1920
+height = 1080

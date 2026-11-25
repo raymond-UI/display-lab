@@ -1,0 +1,60 @@
+name = "stand-in"
+description = """
+With the projector gone and the laptop the only screen, the audience output
+stands in on the laptop. When the projector returns it moves back, on the
+slide it was on.
+"""
+
+[[screens]]
+id = "laptop"
+profile = "laptop-1080p"
+host = true
+
+[[screens]]
+id = "projector"
+profile = "xga-projector"
+
+[[steps]]
+step = "launch"
+
+[[steps]]
+step = "input"
+action = "go_to"
+args = { slide = 4 }
+
+[[steps]]
+step = "expect_matches"
+screen = "projector"
+output = "audience"
+
+[[steps]]
+step = "unplug"
+screen = "projector"
+
+[[steps]]
+step = "expect_unbound"
+output = "audience"
+
+[[steps]]
+step = "expect_matches"
+screen = "laptop"
+output = "audience"
+
+[[steps]]
+step = "plug"
+screen = "projector"
+
+[[steps]]
+step = "expect_bound"
+output = "audience"
+screen = "projector"
+
+[[steps]]
+step = "expect_matches"
+screen = "projector"
+output = "audience"
+
+[[steps]]
+step = "expect_state"
+pointer = "/slide"
+equals = 4

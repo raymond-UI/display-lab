@@ -1,0 +1,36 @@
+name = "letterbox"
+description = "A 16:9 deck on a 4:3 projector is letterboxed exactly as the app renders it."
+
+[[screens]]
+id = "laptop"
+profile = "laptop-1080p"
+host = true
+
+[[screens]]
+id = "projector"
+profile = "xga-projector"
+
+[[steps]]
+step = "launch"
+
+[[steps]]
+step = "expect_matches"
+screen = "projector"
+output = "audience"
+
+[[steps]]
+step = "input"
+action = "blank"
+
+[[steps]]
+step = "expect_blank"
+screen = "projector"
+
+[[steps]]
+step = "input"
+action = "unblank"
+
+[[steps]]
+step = "expect_matches"
+screen = "projector"
+output = "audience"

@@ -1,0 +1,20 @@
+name = "mini-projector"
+description = "A cheap mini projector: native 720p, but it advertises 1080p and 4K and scales down whatever it gets."
+
+[identity]
+vendor = 0x1D10
+product = 0x0700
+serial = 3001
+name = "Lab Mini Projector"
+
+[[modes]]
+width = 1920
+height = 1080
+
+[[modes]]
+width = 3840
+height = 2160
+
+[[modes]]
+width = 1280
+height = 720

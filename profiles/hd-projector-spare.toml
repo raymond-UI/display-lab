@@ -1,0 +1,16 @@
+name = "hd-projector-spare"
+description = "The same model as hd-projector, a different unit: same name, different serial. For swap scenarios."
+
+[identity]
+vendor = 0x1D10
+product = 0x0500
+serial = 2002
+name = "Lab HD Projector"
+
+[[modes]]
+width = 1920
+height = 1080
+
+[[modes]]
+width = 1280
+height = 720

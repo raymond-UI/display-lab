@@ -1,0 +1,42 @@
+name = "projector-wakes-late"
+description = """
+The app starts before the projector has finished waking. Something must be
+visible on the laptop while it waits, and content must reach the projector
+once the OS reports it.
+"""
+
+[[screens]]
+id = "laptop"
+profile = "laptop-1080p"
+host = true
+
+[[screens]]
+id = "projector"
+profile = "hd-projector"
+
+[[screens]]
+id = "projector-waking"
+profile = "hd-projector"
+plugged = false
+report_delay_ms = 3000
+
+[[steps]]
+step = "launch"
+
+[[steps]]
+step = "unplug"
+screen = "projector"
+
+[[steps]]
+step = "plug"
+screen = "projector-waking"
+
+[[steps]]
+step = "expect_content"
+screen = "laptop"
+within_ms = 1000
+
+[[steps]]
+step = "expect_content"
+screen = "projector-waking"
+within_ms = 8000

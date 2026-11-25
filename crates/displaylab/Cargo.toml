@@ -1,0 +1,26 @@
+[package]
+name = "displaylab"
+description = "Display Lab's command line: run scenarios, validate files, list profiles."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "displaylab"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+lab-adapter.workspace = true
+lab-core.workspace = true
+lab-fake.workspace = true
+lab-mac.workspace = true
+lab-runner.workspace = true
+lab-win.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

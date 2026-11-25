@@ -1,0 +1,39 @@
+name = "cable-pull"
+description = """
+Someone knocks the projector cable out mid-presentation and plugs it back in.
+Content must come back on the projector with no input from anyone.
+(A real gathering loses the cable for longer; 2 s keeps CI fast.)
+"""
+
+[[screens]]
+id = "laptop"
+profile = "laptop-1080p"
+host = true
+
+[[screens]]
+id = "projector"
+profile = "hd-projector"
+
+[[steps]]
+step = "launch"
+
+[[steps]]
+step = "expect_content"
+screen = "projector"
+
+[[steps]]
+step = "unplug"
+screen = "projector"
+
+[[steps]]
+step = "wait"
+ms = 2000
+
+[[steps]]
+step = "plug"
+screen = "projector"
+
+[[steps]]
+step = "expect_content"
+screen = "projector"
+within_ms = 5000

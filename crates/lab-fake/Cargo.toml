@@ -1,0 +1,16 @@
+[package]
+name = "lab-fake"
+description = "An in-memory display backend and a fake presentation app, so whole scenarios run on any machine."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+lab-adapter.workspace = true
+lab-core.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

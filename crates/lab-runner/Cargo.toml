@@ -1,0 +1,21 @@
+[package]
+name = "lab-runner"
+description = "Runs Display Lab scenarios against a display backend and an app adapter, and reports."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+lab-adapter.workspace = true
+lab-compare.workspace = true
+lab-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+lab-fake.workspace = true
+
+[lints]
+workspace = true

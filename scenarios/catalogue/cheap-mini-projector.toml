@@ -1,0 +1,30 @@
+name = "cheap-mini-projector"
+description = """
+A mini projector that advertises 4K. The app is handed a 4K screen; content
+must reach it and advances must show.
+"""
+
+[[screens]]
+id = "laptop"
+profile = "laptop-1080p"
+host = true
+
+[[screens]]
+id = "projector"
+profile = "mini-projector"
+mode = "3840x2160"
+
+[[steps]]
+step = "launch"
+
+[[steps]]
+step = "expect_content"
+screen = "projector"
+
+[[steps]]
+step = "input"
+action = "next"
+
+[[steps]]
+step = "expect_changed"
+screen = "projector"

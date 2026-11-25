@@ -1,0 +1,26 @@
+name = "four-three-projector"
+description = "A 4:3 XGA projector. Content must reach it, and an advance must show on it."
+
+[[screens]]
+id = "laptop"
+profile = "laptop-1080p"
+host = true
+
+[[screens]]
+id = "projector"
+profile = "xga-projector"
+
+[[steps]]
+step = "launch"
+
+[[steps]]
+step = "expect_content"
+screen = "projector"
+
+[[steps]]
+step = "input"
+action = "next"
+
+[[steps]]
+step = "expect_changed"
+screen = "projector"

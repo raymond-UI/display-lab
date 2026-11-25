@@ -1,0 +1,18 @@
+[package]
+name = "lab-adapter"
+description = "Display Lab's app adapter: the protocol, the trait, a stdio client and a server helper."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64.workspace = true
+lab-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

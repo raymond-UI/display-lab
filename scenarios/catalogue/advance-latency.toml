@@ -1,0 +1,44 @@
+name = "advance-latency"
+description = """
+How long from an advance to the picture changing on the projector. On a
+virtual screen this measures up to the compositor, not the glass; use it to
+catch regressions between builds.
+"""
+
+[[screens]]
+id = "laptop"
+profile = "laptop-1080p"
+host = true
+
+[[screens]]
+id = "projector"
+profile = "hd-projector"
+
+[[steps]]
+step = "launch"
+
+[[steps]]
+step = "expect_content"
+screen = "projector"
+
+[[steps]]
+step = "input"
+action = "next"
+mark = "first"
+
+[[steps]]
+step = "expect_changed"
+screen = "projector"
+since = "first"
+max_latency_ms = 100
+
+[[steps]]
+step = "input"
+action = "next"
+mark = "second"
+
+[[steps]]
+step = "expect_changed"
+screen = "projector"
+since = "second"
+max_latency_ms = 100

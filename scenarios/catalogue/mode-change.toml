@@ -1,0 +1,36 @@
+name = "mode-change"
+description = """
+The projector renegotiates from 1080p down to 720p while the app is live.
+Content must come back at the new resolution. (On macOS a mode change is an
+unplug and a plug in the new mode; see lab-mac.)
+"""
+
+[[screens]]
+id = "laptop"
+profile = "laptop-1080p"
+host = true
+
+[[screens]]
+id = "projector"
+profile = "hd-projector"
+
+[[steps]]
+step = "launch"
+
+[[steps]]
+step = "expect_content"
+screen = "projector"
+
+[[steps]]
+step = "unplug"
+screen = "projector"
+
+[[steps]]
+step = "plug"
+screen = "projector"
+mode = "1280x720"
+
+[[steps]]
+step = "expect_content"
+screen = "projector"
+within_ms = 5000
