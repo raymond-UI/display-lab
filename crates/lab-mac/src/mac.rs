@@ -211,6 +211,20 @@ impl Displays for MacDisplays {
     fn screens(&mut self) -> Result<Vec<ScreenInfo>, BackendError> {
         let active = cg::active_displays();
         let r = lock(&self.registry);
+        if std::env::var_os("DISPLAYLAB_DEBUG").is_some() {
+            for e in &r.entries {
+                eprintln!(
+                    "[lab-mac] screen {:?}: cg={:?} host={} active={} has_mode={} failed={:?}",
+                    e.lab,
+                    e.cg,
+                    e.host,
+                    e.cg.is_some_and(|c| active.contains(&c)),
+                    e.cg.and_then(cg::facts).is_some(),
+                    e.failed
+                );
+            }
+            eprintln!("[lab-mac] active displays: {active:?}");
+        }
         Ok(r.entries
             .iter()
             .filter_map(|e| {

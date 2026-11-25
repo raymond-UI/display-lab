@@ -290,9 +290,15 @@ impl Run<'_, '_> {
                 return Ok(());
             }
             if Instant::now() >= deadline {
+                let seen: Vec<String> = reported
+                    .iter()
+                    .map(|s| format!("{:?} {:?} {}", s.id, s.identity.name, s.mode))
+                    .collect();
                 return Err(format!(
-                    "{missing} screen(s) were plugged in but not reported within {} s",
-                    SETTLE.as_secs()
+                    "{missing} screen(s) were plugged in but not reported within {} s \
+                     (waiting for {wanted:?}; the backend reports [{}])",
+                    SETTLE.as_secs(),
+                    seen.join(", ")
                 ));
             }
             std::thread::sleep(POLL);

@@ -90,6 +90,8 @@ jobs:
           echo "--- after the host exits"
           python3 ci/list-displays.py
       - name: Smoke test on the real backend
+        env:
+          DISPLAYLAB_DEBUG: "1"
         run: ./target/debug/displaylab run --backend mac --adapter "python3 adapters/example-python/adapter.py" scenarios/smoke/virtual-screen.toml
       - name: Displays afterwards
         if: always()
