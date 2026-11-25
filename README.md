@@ -49,8 +49,8 @@ displaylab validate scenarios/**/*.toml   # check files without running anything
 | --- | --- |
 | Core, compare, adapter protocol, runner, report, CLI | Built and tested on Linux (55 tests, clippy clean) |
 | Fake backend and fake presenter | Built and tested; the full catalogue passes, and fails as expected with bugs injected |
-| macOS backend | Written against the real crate APIs, **not yet compiled or run** (no macOS target on the machine it was written on) |
-| Windows backend | Not written; blocked on whether the Virtual Display Driver can give each screen its own EDID |
+| macOS backend | Runs on GitHub's hosted macOS 26 runners: plugs virtual screens with the requested identity, captures them, unplugs and replugs in a new mode (`macos-virtual-screen`) |
+| Windows backend | Not written. CI shows a hosted runner can install the Virtual Display Driver and gets a new monitor, but the driver takes one EDID for every screen, so per-screen identities need a fork |
 
 ## Writing scenarios and adapters
 
@@ -68,9 +68,9 @@ displaylab validate scenarios/**/*.toml   # check files without running anything
 | --- | --- |
 | `linux` | fmt, clippy, all tests, and the full catalogue on the fake backend: it passes against a good app and fails against a broken one |
 | `macos-build` | the macOS backend compiles and the tests pass on macOS |
-| `macos-virtual-screen` | *Experimental.* Whether a hosted macOS runner can create and capture a virtual screen. Grants Screen Recording by writing the TCC database (`ci/grant-screen-recording.sh`), which Apple does not support |
+| `macos-virtual-screen` | A hosted macOS runner creates, captures, unplugs and replugs a real virtual screen. Grants Screen Recording by writing the TCC database (`ci/grant-screen-recording.sh`), which Apple does not support and a future image may break, so the job cannot fail the run |
 | `windows` | clippy, tests and the catalogue on Windows |
-| `windows-display-driver` | *Experimental.* Whether a hosted Windows runner can install the Virtual Display Driver (`ci/probe-virtual-display-driver.ps1`) |
+| `windows-display-driver` | A hosted Windows runner installs the Virtual Display Driver (trusting its publisher first, with the bundled devcon) and gets a second monitor (`ci/probe-virtual-display-driver.ps1`) |
 
 ## macOS notes
 
