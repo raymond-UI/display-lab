@@ -41,6 +41,9 @@ unsafe extern "C" {
     fn CGDisplayModeGetWidth(mode: *mut c_void) -> usize;
     fn CGDisplayModeGetRefreshRate(mode: *mut c_void) -> f64;
     fn CGDisplayModeRelease(mode: *mut c_void);
+    fn CGDisplayPixelsWide(display: DisplayId) -> usize;
+    fn CGDisplayPixelsHigh(display: DisplayId) -> usize;
+    fn CGDisplayIsActive(display: DisplayId) -> u32;
 }
 
 /// Every display the window server is drawing to right now.
@@ -77,31 +80,57 @@ pub struct Facts {
 }
 
 /// What CoreGraphics says about a display, or `None` if it has gone.
+///
+/// A `CGVirtualDisplay` on a hosted macOS 26 runner is active and has bounds
+/// but answers `CGDisplayCopyDisplayMode` with nothing, so the mode object is
+/// optional: without it, size comes from the pixel counts (or the bounds) and
+/// the refresh rate is left for the caller to fill in.
 pub fn facts(id: DisplayId) -> Option<Facts> {
-    // SAFETY: each call takes any display id; the mode is released below.
+    // SAFETY: each call takes any display id; a copied mode is released below.
     unsafe {
-        let mode = CGDisplayCopyDisplayMode(id);
-        if mode.is_null() {
+        if CGDisplayIsActive(id) == 0 {
             return None;
         }
-        let pixels = CGDisplayModeGetPixelWidth(mode);
-        let points = CGDisplayModeGetWidth(mode);
-        let facts = Facts {
-            vendor: CGDisplayVendorNumber(id),
-            product: CGDisplayModelNumber(id),
-            serial: CGDisplaySerialNumber(id),
-            origin: {
-                let b = CGDisplayBounds(id);
-                (b.origin.x as i32, b.origin.y as i32)
-            },
-            width: pixels as u32,
-            height: CGDisplayModeGetPixelHeight(mode) as u32,
-            // Virtual displays often report 0 Hz; the caller fills it in.
-            refresh_hz: CGDisplayModeGetRefreshRate(mode),
-            hidpi: points > 0 && pixels > points,
+        let bounds = CGDisplayBounds(id);
+        let origin = (bounds.origin.x as i32, bounds.origin.y as i32);
+        let (vendor, product, serial) = (
+            CGDisplayVendorNumber(id),
+            CGDisplayModelNumber(id),
+            CGDisplaySerialNumber(id),
+        );
+        let mode = CGDisplayCopyDisplayMode(id);
+        let (width, height, refresh_hz, hidpi) = if mode.is_null() {
+            let (mut w, mut h) = (CGDisplayPixelsWide(id), CGDisplayPixelsHigh(id));
+            if w == 0 || h == 0 {
+                (w, h) = (bounds.size.width as usize, bounds.size.height as usize);
+            }
+            (w, h, 0.0, false)
+        } else {
+            let pixels = CGDisplayModeGetPixelWidth(mode);
+            let points = CGDisplayModeGetWidth(mode);
+            let facts = (
+                pixels,
+                CGDisplayModeGetPixelHeight(mode),
+                // Virtual displays often report 0 Hz; the caller fills it in.
+                CGDisplayModeGetRefreshRate(mode),
+                points > 0 && pixels > points,
+            );
+            CGDisplayModeRelease(mode);
+            facts
         };
-        CGDisplayModeRelease(mode);
-        Some(facts)
+        if width == 0 || height == 0 {
+            return None;
+        }
+        Some(Facts {
+            vendor,
+            product,
+            serial,
+            origin,
+            width: width as u32,
+            height: height as u32,
+            refresh_hz,
+            hidpi,
+        })
     }
 }
 
