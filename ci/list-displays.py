@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Print every display CoreGraphics knows about: online, active, and drawable.
+"""Print every display CoreGraphics knows about: online and active.
 
 Diagnostic for CI. A virtual display can exist without being in the active
 list (mirrored, asleep, or never brought up), and the difference matters.
@@ -38,8 +38,7 @@ def listing(fn):
     return err, list(ids[: count.value])
 
 
-for label, fn in (("online", cg.CGGetOnlineDisplayList), ("active", cg.CGGetActiveDisplayList),
-                  ("drawable", cg.CGGetDrawableDisplayList)):
+for label, fn in (("online", cg.CGGetOnlineDisplayList), ("active", cg.CGGetActiveDisplayList)):
     err, ids = listing(fn)
     print(f"{label:9} err={err} ids={ids}")
 

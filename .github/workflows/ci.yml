@@ -75,6 +75,7 @@ jobs:
       - name: Grant Screen Recording
         run: bash ci/grant-screen-recording.sh "$PWD/target/debug/displaylab" "$PWD/target/debug/displaylab-screen-host"
       - name: Diagnose one virtual screen by hand
+        continue-on-error: true
         run: |
           echo "--- before"
           python3 ci/list-displays.py
