@@ -1,6 +1,8 @@
-//! `displaylab-screen-host`: owns exactly one virtual screen.
+//! The screen host: a `displaylab` process that owns exactly one virtual
+//! screen.
 //!
-//! The lab starts one of these per screen it plugs in. It creates a
+//! The lab starts one per screen it plugs in, by running its own executable
+//! with [`ARG`] first. One binary keeps installing the lab to a single file. It creates a
 //! `CGVirtualDisplay`, prints `ready <display id>` on stdout, and then keeps
 //! the screen alive until stdin closes or the process is killed. When the
 //! process exits, for any reason, the window server removes the screen.
@@ -14,15 +16,20 @@
 //!
 //! On failure it prints `error <reason>` and exits 2.
 
+/// The first argument that turns a `displaylab` process into a screen host.
+pub const ARG: &str = "__screen-host";
+
+/// Run as a screen host with `args` (everything after [`ARG`]). Never
+/// returns: the process lives as long as its screen.
 #[cfg(not(target_os = "macos"))]
-fn main() {
-    println!("error displaylab-screen-host only runs on macOS");
+pub fn run(_args: Vec<String>) -> ! {
+    println!("error the screen host only runs on macOS");
     std::process::exit(2);
 }
 
 #[cfg(target_os = "macos")]
-fn main() {
-    match host::run() {
+pub fn run(args: Vec<String>) -> ! {
+    match host::run(args) {
         Ok(never) => match never {},
         Err(reason) => {
             println!("error {reason}");
@@ -55,8 +62,8 @@ mod host {
         delay_ms: u64,
     }
 
-    fn parse() -> Result<Args, String> {
-        let mut it = std::env::args().skip(1);
+    fn parse(args: Vec<String>) -> Result<Args, String> {
+        let mut it = args.into_iter();
         let get = |key: &str, it: &mut dyn Iterator<Item = String>| {
             it.next().ok_or_else(|| format!("{key} needs a value"))
         };
@@ -124,8 +131,8 @@ mod host {
         static _dispatch_main_q: AnyObject;
     }
 
-    pub fn run() -> Result<Never, String> {
-        let a = parse()?;
+    pub fn run(args: Vec<String>) -> Result<Never, String> {
+        let a = parse(args)?;
         if a.delay_ms > 0 {
             std::thread::sleep(Duration::from_millis(a.delay_ms));
         }

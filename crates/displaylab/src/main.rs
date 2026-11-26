@@ -3,15 +3,24 @@
 //! Exit codes: 0 every scenario passed, 1 at least one failed, 2 the lab
 //! itself could not do its job (bad file, missing backend, adapter would not
 //! start). A CI script can tell "the app regressed" from "the lab is broken".
+//!
+//! The shipped profiles and scenarios are built in, so an installed
+//! `displaylab` is a single file that works from any folder.
+
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
-use lab_adapter::{Adapter, RpcAdapter};
-use lab_core::{Capture, Displays, ProfileSet, Scenario};
+use lab_adapter::{Adapter, AdapterError, AppInfo, Capabilities, RpcAdapter};
+use lab_core::{Capture, Displays, Profile, ProfileSet, Scenario, ScreenInfo};
 use lab_fake::FakeBugs;
 use lab_runner::{Report, Runner};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+
+mod builtin {
+    include!(concat!(env!("OUT_DIR"), "/builtin.rs"));
+}
 
 const EXIT_FAIL: u8 = 1;
 const EXIT_TOOL_ERROR: u8 = 2;
@@ -23,9 +32,10 @@ const EXIT_TOOL_ERROR: u8 = 2;
     about = "Test what an app puts on the screens."
 )]
 struct Cli {
-    /// Directory of display profiles.
-    #[arg(long, global = true, default_value = "profiles")]
-    profiles: PathBuf,
+    /// A folder of your own display profiles, added to the built-in ones
+    /// (a profile with a built-in's name replaces it).
+    #[arg(long, global = true)]
+    profiles: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
@@ -34,16 +44,19 @@ struct Cli {
 enum Command {
     /// Run scenarios and write a report for each.
     Run {
-        /// Scenario files.
+        /// Scenario files or folders, or built-in scenarios by name:
+        /// `catalogue` runs the whole group, `cable-pull` or
+        /// `catalogue/cable-pull` runs one. `displaylab scenarios` lists them.
         #[arg(required = true)]
-        scenarios: Vec<PathBuf>,
+        scenarios: Vec<String>,
         /// Which screens to use. `native` is this machine's own backend.
         #[arg(long, value_enum, default_value_t = BackendChoice::Native)]
         backend: BackendChoice,
         /// The app's adapter: a command (`--adapter "node adapter.js"`), or
         /// `mcp:<file>` to drive an app's own MCP server from a config file
-        /// (`--adapter mcp:my-app.mcp.toml`). Not used with the fake backend,
-        /// which brings its own app.
+        /// (`--adapter mcp:my-app.mcp.toml`). Without one, a real backend
+        /// runs with no app: enough to check screens work (`run smoke`). Not
+        /// used with the fake backend, which brings its own app.
         #[arg(long)]
         adapter: Option<String>,
         /// Make the fake app misbehave: ignore-hotplug, bind-by-name,
@@ -57,10 +70,12 @@ enum Command {
     /// Check scenario files and profiles without running anything.
     Validate {
         #[arg(required = true)]
-        scenarios: Vec<PathBuf>,
+        scenarios: Vec<String>,
     },
     /// List the display profiles.
     Profiles,
+    /// List the built-in scenarios.
+    Scenarios,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -72,6 +87,11 @@ enum BackendChoice {
 }
 
 fn main() -> ExitCode {
+    // The macOS backend runs one copy of this executable per virtual screen.
+    let mut args = std::env::args().skip(1);
+    if args.next().as_deref() == Some(lab_mac::screen_host::ARG) {
+        lab_mac::screen_host::run(args.collect());
+    }
     let cli = Cli::parse();
     match dispatch(cli) {
         Ok(code) => code,
@@ -83,9 +103,28 @@ fn main() -> ExitCode {
 }
 
 fn dispatch(cli: Cli) -> Result<ExitCode> {
-    let profiles = ProfileSet::load_dir(&cli.profiles)
-        .with_context(|| format!("loading profiles from {}", cli.profiles.display()))?;
+    let profiles = load_profiles(cli.profiles.as_deref())?;
     match cli.command {
+        Command::Scenarios => {
+            let mut group = "";
+            for (g, stem, text) in builtin::SCENARIOS {
+                if *g != group {
+                    group = g;
+                    println!("{g}");
+                }
+                let scenario = Scenario::from_toml(text, stem)?;
+                let flat = scenario
+                    .description
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let summary = flat.split_inclusive(". ").next().unwrap_or("").trim();
+                println!("  {stem:<24} {summary}");
+            }
+            println!();
+            println!("Run one with `displaylab run <name>`, or a whole group with `displaylab run <group>`.");
+            Ok(ExitCode::SUCCESS)
+        }
         Command::Profiles => {
             for p in profiles.iter() {
                 let modes: Vec<String> = p.modes.iter().map(|m| m.to_string()).collect();
@@ -102,9 +141,8 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         Command::Validate { scenarios } => {
-            for path in &scenarios {
-                let scenario = load_scenario(path)?;
-                check_profiles(&scenario, &profiles, path)?;
+            for (path, scenario) in &find_scenarios(&scenarios)? {
+                check_profiles(scenario, &profiles, path)?;
                 println!(
                     "ok  {}  ({} screens, {} steps)",
                     path.display(),
@@ -121,10 +159,10 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
             fake_bugs,
             out,
         } => {
-            let scenarios: Vec<(PathBuf, Scenario)> = scenarios
-                .into_iter()
-                .map(|p| load_scenario(&p).map(|s| (p, s)))
-                .collect::<Result<_>>()?;
+            let scenarios = find_scenarios(&scenarios)?;
+            for (path, scenario) in &scenarios {
+                check_profiles(scenario, &profiles, path)?;
+            }
             let backend = resolve(backend);
             let bugs = parse_bugs(&fake_bugs)?;
             if backend != BackendChoice::Fake && !fake_bugs.is_empty() {
@@ -198,7 +236,11 @@ fn run_one(
     scenario: &Scenario,
     artifacts: &Path,
 ) -> Result<Report> {
-    let scenario_dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    let scenario_dir = if path.is_file() {
+        path.parent().map(Path::to_path_buf).unwrap_or_default()
+    } else {
+        PathBuf::new() // a built-in: no files of its own
+    };
     let backend_name = match backend {
         BackendChoice::Fake => "fake",
         BackendChoice::Mac => "mac",
@@ -221,12 +263,9 @@ fn run_one(
             (Box::new(d), Box::new(c), Box::new(a))
         }
         real => {
-            let Some(spec) = adapter else {
-                bail!("a real backend needs the app's adapter: --adapter \"<command>\" or --adapter mcp:<file>");
-            };
             // Load the adapter's config before touching any screen, so a
             // bad file costs nothing.
-            let mcp = match spec.strip_prefix("mcp:") {
+            let mcp = match adapter.and_then(|spec| spec.strip_prefix("mcp:")) {
                 Some(file) => Some(
                     lab_mcp::McpAdapter::load(Path::new(file))
                         .with_context(|| format!("loading MCP adapter config {file:?}"))?,
@@ -239,9 +278,10 @@ fn run_one(
                 _ => bail!("this machine has no native display backend; use --backend fake"),
             }
             .context("starting the display backend")?;
-            let app: Box<dyn Adapter> = match mcp {
-                Some(mcp) => Box::new(mcp),
-                None => {
+            let app: Box<dyn Adapter> = match (mcp, adapter) {
+                (Some(mcp), _) => Box::new(mcp),
+                (None, None) => Box::new(NoApp::new()),
+                (None, Some(spec)) => {
                     let words = split_command(spec)?;
                     Box::new(
                         RpcAdapter::spawn(&words)
@@ -269,6 +309,121 @@ fn load_scenario(path: &Path) -> Result<Scenario> {
     let text =
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     Ok(Scenario::from_toml(&text, &path.display().to_string())?)
+}
+
+/// The built-in profiles, then the ones in `dir`, which win on a name clash.
+fn load_profiles(dir: Option<&Path>) -> Result<ProfileSet> {
+    let mut set = ProfileSet::default();
+    for (name, text) in builtin::PROFILES {
+        set.insert(Profile::from_toml(text, &format!("built-in {name}"))?)?;
+    }
+    if let Some(dir) = dir {
+        let mine = ProfileSet::load_dir(dir)
+            .with_context(|| format!("loading profiles from {}", dir.display()))?;
+        for p in mine.iter() {
+            set.replace(p.clone());
+        }
+    }
+    Ok(set)
+}
+
+/// Each argument as scenarios: a file, a folder of `*.toml`, a built-in
+/// group (`catalogue`), or one built-in (`cable-pull`, `catalogue/cable-pull`).
+/// A file or folder on disk wins over a built-in of the same name.
+fn find_scenarios(args: &[String]) -> Result<Vec<(PathBuf, Scenario)>> {
+    let mut out = vec![];
+    for arg in args {
+        let path = Path::new(arg);
+        if path.is_file() {
+            out.push((path.to_path_buf(), load_scenario(path)?));
+            continue;
+        }
+        if path.is_dir() {
+            let mut files: Vec<PathBuf> = std::fs::read_dir(path)
+                .with_context(|| format!("reading {}", path.display()))?
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.extension().is_some_and(|x| x == "toml"))
+                .collect();
+            files.sort();
+            if files.is_empty() {
+                bail!("{} has no scenario files (*.toml)", path.display());
+            }
+            for f in files {
+                let s = load_scenario(&f)?;
+                out.push((f, s));
+            }
+            continue;
+        }
+        let picked: Vec<_> = builtin::SCENARIOS
+            .iter()
+            .filter(|(group, stem, _)| {
+                arg == group || arg == stem || *arg == format!("{group}/{stem}")
+            })
+            .collect();
+        let groups: std::collections::BTreeSet<_> = picked.iter().map(|(g, _, _)| *g).collect();
+        if picked.is_empty() {
+            bail!(
+                "no scenario file, folder or built-in scenario named {arg:?}; \
+                 `displaylab scenarios` lists the built-ins"
+            );
+        }
+        if groups.len() > 1 && !builtin::SCENARIOS.iter().any(|(g, _, _)| g == arg) {
+            let names: Vec<String> = picked.iter().map(|(g, s, _)| format!("{g}/{s}")).collect();
+            bail!(
+                "{arg:?} is in more than one group; pick one: {}",
+                names.join(", ")
+            );
+        }
+        for (group, stem, text) in picked {
+            let label = format!("built-in {group}/{stem}");
+            // Built-ins refer to no files, so their folder is the current one.
+            out.push((PathBuf::from(&label), Scenario::from_toml(text, &label)?));
+        }
+    }
+    Ok(out)
+}
+
+/// The app for a run with no `--adapter`: launches nothing and refuses input.
+/// Enough for scenarios that only look at the screens.
+struct NoApp {
+    info: AppInfo,
+}
+
+impl NoApp {
+    fn new() -> NoApp {
+        NoApp {
+            info: AppInfo {
+                name: "no app".into(),
+                version: String::new(),
+                protocol: "1.0".into(),
+                capabilities: Capabilities::default(),
+            },
+        }
+    }
+}
+
+impl Adapter for NoApp {
+    fn info(&self) -> &AppInfo {
+        &self.info
+    }
+
+    fn launch(&mut self, _screens: &[ScreenInfo]) -> Result<(), AdapterError> {
+        Ok(())
+    }
+
+    fn input(&mut self, action: &str, _args: &serde_json::Value) -> Result<(), AdapterError> {
+        Err(AdapterError::Remote {
+            code: -32001,
+            message: format!(
+                "this run drives no app, so it cannot send {action:?}; \
+                 pass --adapter to test an app"
+            ),
+        })
+    }
+
+    fn stop(&mut self) -> Result<(), AdapterError> {
+        Ok(())
+    }
 }
 
 fn check_profiles(scenario: &Scenario, profiles: &ProfileSet, path: &Path) -> Result<()> {
@@ -362,6 +517,28 @@ mod tests {
         );
         assert!(split_command(r#"node "open"#).is_err());
         assert!(split_command("   ").is_err());
+    }
+
+    #[test]
+    fn every_built_in_loads_and_names_real_profiles() {
+        let profiles = load_profiles(None).unwrap();
+        assert!(profiles.iter().count() >= 5);
+        let all =
+            find_scenarios(&["catalogue".into(), "smoke".into(), "fake-presenter".into()]).unwrap();
+        assert!(all.len() >= 10, "{} built-in scenarios", all.len());
+        for (path, s) in &all {
+            check_profiles(s, &profiles, path).unwrap();
+        }
+    }
+
+    #[test]
+    fn scenarios_are_found_by_name() {
+        let one = |arg: &str| find_scenarios(&[arg.into()]).map(|v| v.len());
+        assert_eq!(one("cable-pull").ok(), Some(1));
+        assert_eq!(one("catalogue/cable-pull").ok(), Some(1));
+        assert!(one("catalogue").is_ok_and(|n| n >= 5));
+        let e = one("no-such-thing").unwrap_err().to_string();
+        assert!(e.contains("displaylab scenarios"), "{e}");
     }
 
     #[test]

@@ -7,13 +7,6 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
-[[bin]]
-# One of these runs per virtual screen. The window server removes a virtual
-# display when the process that created it exits, so killing this process is
-# the cleanest possible cable pull, and a crash cannot leak a screen.
-name = "displaylab-screen-host"
-path = "src/bin/screen_host.rs"
-
 [dependencies]
 lab-core.workspace = true
 

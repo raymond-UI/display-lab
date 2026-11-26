@@ -1,0 +1,107 @@
+# Builds the installable binaries.
+#
+# A tag like v0.2.0 publishes a GitHub release with one archive per platform
+# and a .sha256 next to each; install.sh downloads from there. Running the
+# workflow by hand builds the same archives as workflow artifacts, without
+# releasing anything.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - name: Build both architectures
+        run: |
+          cargo build --release --locked -p displaylab --target aarch64-apple-darwin
+          cargo build --release --locked -p displaylab --target x86_64-apple-darwin
+      - name: One universal binary
+        run: |
+          mkdir -p dist/pkg
+          lipo -create -output dist/pkg/displaylab \
+            target/aarch64-apple-darwin/release/displaylab \
+            target/x86_64-apple-darwin/release/displaylab
+          # lipo drops the slices' ad-hoc signatures; Apple Silicon will not
+          # run an unsigned binary.
+          codesign --force --sign - dist/pkg/displaylab
+          lipo -info dist/pkg/displaylab
+          dist/pkg/displaylab --version
+          dist/pkg/displaylab run --backend fake --out dist/check catalogue
+      - name: Package
+        run: |
+          cp README.md LICENSE-MIT LICENSE-APACHE dist/pkg/
+          tar -czf dist/displaylab-macos.tar.gz -C dist/pkg .
+          cd dist && shasum -a 256 displaylab-macos.tar.gz > displaylab-macos.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: displaylab-macos
+          path: dist/displaylab-macos.tar.gz*
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --locked -p displaylab
+      - name: Package
+        run: |
+          mkdir -p dist/pkg
+          cp target/release/displaylab README.md LICENSE-MIT LICENSE-APACHE dist/pkg/
+          dist/pkg/displaylab run --backend fake --out dist/check catalogue
+          tar -czf dist/displaylab-linux-x86_64.tar.gz -C dist/pkg .
+          cd dist && sha256sum displaylab-linux-x86_64.tar.gz > displaylab-linux-x86_64.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: displaylab-linux
+          path: dist/displaylab-linux-x86_64.tar.gz*
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --locked -p displaylab
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist/pkg | Out-Null
+          Copy-Item target/release/displaylab.exe, README.md, LICENSE-MIT, LICENSE-APACHE dist/pkg/
+          dist/pkg/displaylab.exe run --backend fake --out dist/check catalogue
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Compress-Archive -Path dist/pkg/* -DestinationPath dist/displaylab-windows-x86_64.zip
+          $hash = (Get-FileHash dist/displaylab-windows-x86_64.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  displaylab-windows-x86_64.zip" | Out-File -Encoding ascii -NoNewline dist/displaylab-windows-x86_64.zip.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: displaylab-windows
+          path: dist/displaylab-windows-x86_64.zip*
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, linux, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l dist
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes

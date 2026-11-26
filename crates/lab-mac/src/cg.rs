@@ -44,6 +44,16 @@ unsafe extern "C" {
     fn CGDisplayPixelsWide(display: DisplayId) -> usize;
     fn CGDisplayPixelsHigh(display: DisplayId) -> usize;
     fn CGDisplayIsActive(display: DisplayId) -> u32;
+    fn CGPreflightScreenCaptureAccess() -> bool;
+    fn CGRequestScreenCaptureAccess() -> bool;
+}
+
+/// Whether this process may capture the screen. The first time it is not,
+/// macOS is asked to show its own prompt (and to list this app in Settings),
+/// which it does once per app.
+pub fn screen_capture_allowed() -> bool {
+    // SAFETY: no arguments; both only read or request a TCC permission.
+    unsafe { CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() }
 }
 
 /// Every display the window server is drawing to right now.

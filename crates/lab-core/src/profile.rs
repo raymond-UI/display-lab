@@ -202,6 +202,12 @@ impl ProfileSet {
         Ok(())
     }
 
+    /// Add `profile`, replacing any profile of the same name. How a
+    /// project's own profiles override the built-in ones.
+    pub fn replace(&mut self, profile: Profile) {
+        self.profiles.insert(profile.name.clone(), profile);
+    }
+
     /// Every `*.toml` in `dir`, not recursive.
     pub fn load_dir(dir: &Path) -> Result<ProfileSet, ProfileError> {
         let io = |source| ProfileError::Io {

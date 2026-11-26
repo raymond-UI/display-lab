@@ -8,7 +8,8 @@
 //!
 //! - The window server removes a virtual display when the process that made
 //!   it exits, even on a crash. So each screen lives in its own small host
-//!   process (`displaylab-screen-host`), and unplugging is killing it.
+//!   process (`displaylab` run as a [`screen_host`]), and unplugging is
+//!   killing it.
 //! - Changing a virtual display's mode makes it un-removable until its
 //!   process exits. So the lab never changes a mode in place: a mode change
 //!   is an unplug and a plug in the new mode.
@@ -23,9 +24,6 @@
 //! Capture is ScreenCaptureKit, one stream per screen, started on first use.
 //! It needs the Screen Recording permission for the process that runs the
 //! lab (the terminal, or the CI runner).
-//!
-//! **Not yet compiled or run.** This crate was written on Linux, where the
-//! macOS target is not available. Build it on a Mac before trusting it.
 
 use lab_core::{Backend, BackendError};
 
@@ -33,6 +31,7 @@ use lab_core::{Backend, BackendError};
 mod cg;
 #[cfg(target_os = "macos")]
 mod mac;
+pub mod screen_host;
 
 /// The display and capture halves of the macOS backend. They share one
 /// table of screens, so capture can find what displays plugged in.

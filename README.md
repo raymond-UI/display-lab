@@ -6,31 +6,45 @@ Display Lab fakes real display setups (a 4:3 projector, a stage monitor, a proje
 
 It works with any desktop app. Everything app-specific sits behind one **adapter**: a small program in any language that speaks a line-based JSON-RPC protocol over stdio, or, if your app already has an MCP server, just a TOML file that maps the lab's requests to your app's tools.
 
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/raymond-UI/display-lab/main/install.sh | sh
+```
+
+That puts one file, `displaylab`, in `~/.local/bin`. Run it again to update; `rm ~/.local/bin/displaylab` removes it. On Windows, download the zip from [Releases](https://github.com/raymond-UI/display-lab/releases).
+
 ## Quick start
 
 ```sh
-cargo build --workspace
-
-# The fake backend runs anywhere, with a built-in fake presentation app.
-./target/debug/displaylab run --backend fake scenarios/catalogue/*.toml
+# Fake screens and a fake app: works anywhere, touches nothing.
+displaylab run --backend fake catalogue
 
 # Make the fake app misbehave and watch the catalogue catch it.
-./target/debug/displaylab run --backend fake --fake-bug ignore-hotplug scenarios/catalogue/*.toml
+displaylab run --backend fake --fake-bug ignore-hotplug catalogue
 
-# On a Mac, against your own app:
-./target/debug/displaylab run --adapter "node my-adapter.js" scenarios/catalogue/cable-pull.toml
+# On a Mac: plug a real virtual projector, capture it, remove it.
+displaylab run smoke
 
-# Or, if your app has an MCP server, with no adapter code at all:
-./target/debug/displaylab run --adapter mcp:my-app.mcp.toml scenarios/catalogue/*.toml
+# Against your own app, with an adapter or your app's MCP server.
+displaylab run --adapter "node my-adapter.js" cable-pull
+displaylab run --adapter mcp:my-app.mcp.toml catalogue
 ```
+
+The first time it touches real screens on a Mac, it asks for the Screen Recording permission for your terminal. Turn it on in System Settings, reopen the terminal, and run again.
+
+The shipped profiles and scenarios are built in: `displaylab scenarios` and `displaylab profiles` list them. Pass a file or a folder to run your own, and `--profiles <folder>` to add your own display profiles.
 
 Each run writes `out/<scenario>/report.md`, `report.json`, and the captured, expected and diff frames for any step that failed. Exit code 0 means every scenario passed, 1 means one failed, and 2 means the lab itself could not run (a bad file, a missing backend, an adapter that would not start).
 
-Other commands:
+```sh
+displaylab validate my-scenarios/   # check files without running anything
+```
+
+### Building from source
 
 ```sh
-displaylab profiles                       # list display profiles
-displaylab validate scenarios/**/*.toml   # check files without running anything
+cargo build --release -p displaylab   # target/release/displaylab
 ```
 
 ## How it fits together
@@ -51,7 +65,7 @@ displaylab validate scenarios/**/*.toml   # check files without running anything
 
 | Part | State |
 | --- | --- |
-| Core, compare, adapter protocol, runner, report, CLI | Built and tested on Linux (72 tests across the workspace, clippy clean) |
+| Core, compare, adapter protocol, runner, report, CLI | Built and tested on Linux (74 tests across the workspace, clippy clean) |
 | Fake backend and fake presenter | Built and tested; the full catalogue passes, and fails as expected with bugs injected |
 | MCP adapter | Built and tested: every shipped scenario passes with the fake presenter behind an MCP server, and every injected bug is still caught |
 | macOS backend | Runs on GitHub's hosted macOS 26 runners: plugs virtual screens with the requested identity, captures them, unplugs and replugs in a new mode (`macos-virtual-screen`) |
@@ -74,6 +88,7 @@ displaylab validate scenarios/**/*.toml   # check files without running anything
 | Job | What it proves |
 | --- | --- |
 | `linux` | fmt, clippy, all tests, and the full catalogue on the fake backend: it passes against a good app and fails against a broken one |
+| `release` (on a `v*` tag) | builds the macOS universal, Linux and Windows binaries that `install.sh` downloads, and publishes them as a release |
 | `macos-build` | the macOS backend compiles and the tests pass on macOS |
 | `macos-virtual-screen` | A hosted macOS runner creates, captures, unplugs and replugs a real virtual screen. Grants Screen Recording by writing the TCC database (`ci/grant-screen-recording.sh`), which Apple does not support and a future image may break, so the job cannot fail the run |
 | `windows` | clippy, tests and the catalogue on Windows |

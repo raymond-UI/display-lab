@@ -44,14 +44,11 @@ fn lock(r: &Shared) -> MutexGuard<'_, Registry> {
 }
 
 pub fn backend() -> Result<Backend, BackendError> {
+    // Each screen host is this same executable, run with the host argument.
     let host_exe = std::env::current_exe()
-        .map_err(|e| BackendError::Platform(format!("locating displaylab: {e}")))?
-        .with_file_name("displaylab-screen-host");
-    if !host_exe.is_file() {
-        return Err(BackendError::Platform(format!(
-            "{} is missing; build the whole workspace (cargo build --workspace)",
-            host_exe.display()
-        )));
+        .map_err(|e| BackendError::Platform(format!("locating displaylab: {e}")))?;
+    if !cg::screen_capture_allowed() {
+        return Err(BackendError::Platform(screen_recording_help()));
     }
     let registry: Shared = Arc::default();
     Ok((
@@ -64,6 +61,25 @@ pub fn backend() -> Result<Backend, BackendError> {
             streams: HashMap::new(),
         }),
     ))
+}
+
+/// What to do when Screen Recording is not allowed, naming the terminal app
+/// when it can be told.
+fn screen_recording_help() -> String {
+    let app = match std::env::var("TERM_PROGRAM").as_deref() {
+        Ok("Apple_Terminal") => "Terminal".to_string(),
+        Ok("iTerm.app") => "iTerm".to_string(),
+        Ok("ghostty") => "Ghostty".to_string(),
+        Ok("vscode") => "Visual Studio Code (or Cursor)".to_string(),
+        Ok("WarpTerminal") => "Warp".to_string(),
+        Ok(other) if !other.is_empty() => other.to_string(),
+        _ => "the app you are running displaylab from".to_string(),
+    };
+    format!(
+        "Display Lab needs the Screen Recording permission to watch the screens.\n  \
+         Open System Settings > Privacy & Security > Screen & System Audio Recording,\n  \
+         turn on {app}, then quit and reopen it and run this again."
+    )
 }
 
 struct MacDisplays {
@@ -105,6 +121,7 @@ impl Displays for MacDisplays {
         let id = &profile.identity;
         let mut command = Command::new(&self.host_exe);
         command
+            .arg(crate::screen_host::ARG)
             .args(["--name", &id.name])
             .args(["--vendor", &id.vendor.to_string()])
             .args(["--product", &id.product.to_string()])
