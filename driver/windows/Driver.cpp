@@ -667,8 +667,8 @@ static string Handle(IndirectDeviceContext* Context, const string& Line)
     if (Cmd == "PLUG")
     {
         unsigned int Index = 0;
-        static char Hex[1024];
-        static char Modes[1024];
+        char Hex[1024] = {};
+        char Modes[1024] = {};
         if (sscanf_s(Line.c_str(), "%*s %u %1023s %1023s", &Index, Hex, static_cast<unsigned>(sizeof(Hex)), Modes,
                      static_cast<unsigned>(sizeof(Modes))) != 3)
         {
@@ -689,6 +689,42 @@ static string Handle(IndirectDeviceContext* Context, const string& Line)
     return "ERR unknown command " + Cmd;
 }
 
+// Requests are answered one at a time, whichever connection they come on.
+static SRWLOCK g_RequestLock = SRWLOCK_INIT;
+
+struct Connection
+{
+    IndirectDeviceContext* Context;
+    HANDLE Pipe;
+};
+
+static DWORD WINAPI ConnectionThread(LPVOID Argument)
+{
+    unique_ptr<Connection> C(static_cast<Connection*>(Argument));
+    string Line;
+    char Buf[512];
+    DWORD Read = 0;
+    while (Line.size() < MaxRequest && Line.find('\n') == string::npos && ReadFile(C->Pipe, Buf, sizeof(Buf), &Read, nullptr) &&
+           Read > 0)
+    {
+        Line.append(Buf, Read);
+    }
+    size_t End = Line.find_first_of("\r\n");
+    if (End != string::npos)
+    {
+        Line.resize(End);
+    }
+    AcquireSRWLockExclusive(&g_RequestLock);
+    string Reply = Handle(C->Context, Line) + "\n";
+    ReleaseSRWLockExclusive(&g_RequestLock);
+    DWORD Written = 0;
+    WriteFile(C->Pipe, Reply.data(), static_cast<DWORD>(Reply.size()), &Written, nullptr);
+    FlushFileBuffers(C->Pipe);
+    DisconnectNamedPipe(C->Pipe);
+    CloseHandle(C->Pipe);
+    return 0;
+}
+
 static DWORD WINAPI PipeThread(LPVOID Argument)
 {
     auto* Context = static_cast<IndirectDeviceContext*>(Argument);
@@ -704,38 +740,35 @@ static DWORD WINAPI PipeThread(LPVOID Argument)
         return 1;
     }
 
+    // Each connection is answered on its own thread, so a new pipe instance
+    // is listening again at once: a client never finds the pipe missing.
     for (;;)
     {
         HANDLE Pipe = CreateNamedPipeW(PipeName, PIPE_ACCESS_DUPLEX, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
                                        PIPE_UNLIMITED_INSTANCES, MaxRequest, MaxRequest, 0, &Sa);
         if (Pipe == INVALID_HANDLE_VALUE)
         {
-            Sleep(1000);
+            Sleep(100);
             continue;
         }
         BOOL Connected = ConnectNamedPipe(Pipe, nullptr) ? TRUE : (GetLastError() == ERROR_PIPE_CONNECTED);
-        if (Connected)
+        if (!Connected)
         {
-            string Line;
-            char Buf[512];
-            DWORD Read = 0;
-            while (Line.size() < MaxRequest && Line.find('\n') == string::npos &&
-                   ReadFile(Pipe, Buf, sizeof(Buf), &Read, nullptr) && Read > 0)
-            {
-                Line.append(Buf, Read);
-            }
-            size_t End = Line.find_first_of("\r\n");
-            if (End != string::npos)
-            {
-                Line.resize(End);
-            }
-            string Reply = Handle(Context, Line) + "\n";
-            DWORD Written = 0;
-            WriteFile(Pipe, Reply.data(), static_cast<DWORD>(Reply.size()), &Written, nullptr);
-            FlushFileBuffers(Pipe);
-            DisconnectNamedPipe(Pipe);
+            CloseHandle(Pipe);
+            continue;
         }
-        CloseHandle(Pipe);
+        auto* C = new Connection{Context, Pipe};
+        HANDLE Thread = CreateThread(nullptr, 0, ConnectionThread, C, 0, nullptr);
+        if (Thread)
+        {
+            CloseHandle(Thread);
+        }
+        else
+        {
+            delete C;
+            DisconnectNamedPipe(Pipe);
+            CloseHandle(Pipe);
+        }
     }
 }
 

@@ -59,6 +59,7 @@ fn debug() -> bool {
 /// One request to the driver: open the pipe, send a line, read the answer.
 fn request(line: &str) -> Result<String, BackendError> {
     let deadline = Instant::now() + Duration::from_secs(5);
+    let not_found_deadline = Instant::now() + Duration::from_millis(1500);
     let pipe = loop {
         match std::fs::OpenOptions::new()
             .read(true)
@@ -66,9 +67,13 @@ fn request(line: &str) -> Result<String, BackendError> {
             .open(PIPE)
         {
             Ok(pipe) => break pipe,
-            // Not there at all: the driver is not installed or not running.
+            // Briefly absent between two connections; absent for good when
+            // the driver is not installed or not running.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Err(BackendError::Platform(NOT_INSTALLED.into()))
+                if Instant::now() >= not_found_deadline {
+                    return Err(BackendError::Platform(NOT_INSTALLED.into()));
+                }
+                std::thread::sleep(Duration::from_millis(20));
             }
             // ERROR_PIPE_BUSY: another request is being answered.
             Err(e) if e.raw_os_error() == Some(231) && Instant::now() < deadline => {
@@ -117,20 +122,24 @@ fn displays() -> Result<Vec<Display>, BackendError> {
         // SAFETY: infoType says the union holds a source mode.
         let source = unsafe { mode.Anonymous.sourceMode };
 
-        let mut name = DISPLAYCONFIG_SOURCE_DEVICE_NAME::default();
-        name.header = header(
-            DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
-            size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>(),
-            path.sourceInfo.adapterId,
-            path.sourceInfo.id,
-        );
-        let mut target = DISPLAYCONFIG_TARGET_DEVICE_NAME::default();
-        target.header = header(
-            DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
-            size_of::<DISPLAYCONFIG_TARGET_DEVICE_NAME>(),
-            path.targetInfo.adapterId,
-            path.targetInfo.id,
-        );
+        let mut name = DISPLAYCONFIG_SOURCE_DEVICE_NAME {
+            header: header(
+                DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+                size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>(),
+                path.sourceInfo.adapterId,
+                path.sourceInfo.id,
+            ),
+            ..Default::default()
+        };
+        let mut target = DISPLAYCONFIG_TARGET_DEVICE_NAME {
+            header: header(
+                DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
+                size_of::<DISPLAYCONFIG_TARGET_DEVICE_NAME>(),
+                path.targetInfo.adapterId,
+                path.targetInfo.id,
+            ),
+            ..Default::default()
+        };
         // SAFETY: each packet's header names its own type and size.
         let ok = unsafe {
             DisplayConfigGetDeviceInfo(&mut name.header) == 0
@@ -688,10 +697,10 @@ impl Capture for WinCapture {
         {
             self.outputs.remove(&id);
         }
-        if !self.outputs.contains_key(&id) {
+        if let std::collections::hash_map::Entry::Vacant(slot) = self.outputs.entry(id) {
             match Self::open(&display.gdi_name)? {
                 Some(out) => {
-                    self.outputs.insert(id, out);
+                    slot.insert(out);
                 }
                 None => return Ok(None),
             }
