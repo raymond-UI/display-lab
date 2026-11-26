@@ -65,11 +65,11 @@ cargo build --release -p displaylab   # target/release/displaylab
 
 | Part | State |
 | --- | --- |
-| Core, compare, adapter protocol, runner, report, CLI | Built and tested on Linux (74 tests across the workspace, clippy clean) |
+| Core, compare, adapter protocol, runner, report, CLI | Built and tested on Linux (80 tests across the workspace, clippy clean) |
 | Fake backend and fake presenter | Built and tested; the full catalogue passes, and fails as expected with bugs injected |
 | MCP adapter | Built and tested: every shipped scenario passes with the fake presenter behind an MCP server, and every injected bug is still caught |
 | macOS backend | Runs on GitHub's hosted macOS 26 runners: plugs virtual screens with the requested identity, captures them, unplugs and replugs in a new mode (`macos-virtual-screen`) |
-| Windows backend | Not written. CI shows a hosted runner can install the Virtual Display Driver and gets a new monitor, but the driver takes one EDID for every screen, so per-screen identities need a fork |
+| Windows backend | In progress. Display Lab has its own small display driver (`driver/windows`) that plugs and unplugs one screen at a time, each with its own EDID; the Rust backend that drives it comes next |
 
 ## Writing scenarios and adapters
 
@@ -92,7 +92,7 @@ cargo build --release -p displaylab   # target/release/displaylab
 | `macos-build` | the macOS backend compiles and the tests pass on macOS |
 | `macos-virtual-screen` | A hosted macOS runner creates, captures, unplugs and replugs a real virtual screen. Grants Screen Recording by writing the TCC database (`ci/grant-screen-recording.sh`), which Apple does not support and a future image may break, so the job cannot fail the run |
 | `windows` | clippy, tests and the catalogue on Windows |
-| `windows-display-driver` | A hosted Windows runner installs the Virtual Display Driver (trusting its publisher first, with the bundled devcon) and gets a second monitor (`ci/probe-virtual-display-driver.ps1`) |
+| `windows-display-driver` | Builds Display Lab's display driver, signs it with a throwaway certificate, installs it, then plugs and unplugs screens and checks each keeps its own identity (`ci/windows-driver.ps1`) |
 
 ## macOS notes
 

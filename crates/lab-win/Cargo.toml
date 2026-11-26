@@ -1,6 +1,6 @@
 [package]
 name = "lab-win"
-description = "Display Lab's Windows backend: Virtual Display Driver screens and Windows Graphics Capture."
+description = "Display Lab's Windows backend: screens from its own indirect display driver, and Desktop Duplication capture."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 lab-core.workspace = true
+thiserror.workspace = true
 
 [lints]
 workspace = true

@@ -548,6 +548,7 @@ name = "lab-win"
 version = "0.1.0"
 dependencies = [
  "lab-core",
+ "thiserror",
 ]
 
 [[package]]

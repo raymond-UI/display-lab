@@ -92,6 +92,22 @@ fn main() -> ExitCode {
     if args.next().as_deref() == Some(lab_mac::screen_host::ARG) {
         lab_mac::screen_host::run(args.collect());
     }
+    // `__edid <profile> [mode]`: the driver plug arguments for a profile, for
+    // the Windows driver's CI probe.
+    let mut args = std::env::args().skip(1);
+    if args.next().as_deref() == Some("__edid") {
+        let rest: Vec<String> = args.collect();
+        return match edid_args(&rest) {
+            Ok(line) => {
+                println!("{line}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("displaylab: {e:#}");
+                ExitCode::from(EXIT_TOOL_ERROR)
+            }
+        };
+    }
     let cli = Cli::parse();
     match dispatch(cli) {
         Ok(code) => code,
@@ -309,6 +325,21 @@ fn load_scenario(path: &Path) -> Result<Scenario> {
     let text =
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     Ok(Scenario::from_toml(&text, &path.display().to_string())?)
+}
+
+fn edid_args(args: &[String]) -> Result<String> {
+    let Some(name) = args.first() else {
+        bail!("usage: displaylab __edid <profile> [WxH@HZ]");
+    };
+    let profiles = load_profiles(None)?;
+    let profile = profiles.get(name)?;
+    let mode = profile.mode(args.get(1).map(String::as_str))?;
+    let edid = lab_win::edid::build(&profile.identity, &mode)?;
+    Ok(format!(
+        "{} {}",
+        lab_win::edid::hex(&edid),
+        lab_win::edid::mode_arg(&mode)
+    ))
 }
 
 /// The built-in profiles, then the ones in `dir`, which win on a name clash.

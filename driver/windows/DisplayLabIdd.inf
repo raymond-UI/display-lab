@@ -1,0 +1,68 @@
+;
+; DisplayLabIdd.inf: Display Lab's virtual screens.
+; Based on Microsoft's IddSampleDriver.inf (MS-PL, see LICENSE-MS-PL).
+;
+
+[Version]
+PnpLockDown=1
+Signature="$Windows NT$"
+ClassGUID={4D36E968-E325-11CE-BFC1-08002BE10318}
+Class=Display
+ClassVer=2.0
+Provider=%ManufacturerName%
+CatalogFile=DisplayLabIdd.cat
+DriverVer=
+
+[Manufacturer]
+%ManufacturerName%=Standard,NT$ARCH$.10.0...19041
+
+[Standard.NT$ARCH$.10.0...19041]
+%DeviceName%=DisplayLab_Install, Root\DisplayLabIdd
+
+[SourceDisksFiles]
+DisplayLabIdd.dll=1
+
+[SourceDisksNames]
+1=%DiskName%
+
+[DisplayLab_Install.NT]
+Include=WUDFRD.inf
+Needs=WUDFRD.NT
+CopyFiles=UMDriverCopy
+
+[DisplayLab_Install.NT.hw]
+Include=WUDFRD.inf
+Needs=WUDFRD.NT.HW
+AddReg=DisplayLab_HardwareDeviceSettings
+
+[DisplayLab_HardwareDeviceSettings]
+HKR,, "UpperFilters", %REG_MULTI_SZ%, "IndirectKmd"
+HKR, "WUDF", "DeviceGroupId", %REG_SZ%, "DisplayLabIddGroup"
+
+[DisplayLab_Install.NT.Services]
+Include=WUDFRD.inf
+Needs=WUDFRD.NT.Services
+
+[DisplayLab_Install.NT.Wdf]
+UmdfService=DisplayLabIdd,DisplayLabIdd_Install
+UmdfServiceOrder=DisplayLabIdd
+UmdfKernelModeClientPolicy=AllowKernelModeClients
+
+[DisplayLabIdd_Install]
+UmdfLibraryVersion=$UMDFVERSION$
+ServiceBinary=%13%\DisplayLabIdd.dll
+UmdfExtensions=IddCx0102
+
+[DestinationDirs]
+UMDriverCopy=13
+
+[UMDriverCopy]
+DisplayLabIdd.dll
+
+[Strings]
+ManufacturerName="Display Lab"
+DiskName="Display Lab Virtual Screens Disk"
+DeviceName="Display Lab Virtual Screens"
+
+REG_MULTI_SZ=0x00010000
+REG_SZ=0x00000000

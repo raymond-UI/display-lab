@@ -124,16 +124,22 @@ jobs:
         shell: bash
         run: ./target/debug/displaylab.exe run --backend fake scenarios/catalogue/*.toml scenarios/fake-presenter/*.toml
 
-  # Experiment: can a hosted Windows runner install the Virtual Display
-  # Driver and get a new monitor? The answer decides how lab-win is built.
+  # Our own display driver: build it, sign it with a throwaway certificate,
+  # install it, and plug and unplug screens with their own identities.
   windows-display-driver:
     runs-on: windows-latest
     continue-on-error: true
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - name: Probe
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p displaylab
+      - name: Build, sign, install and probe the driver
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: ./ci/probe-virtual-display-driver.ps1
+        run: ./ci/windows-driver.ps1 -Displaylab target\debug\displaylab.exe
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-driver-package
+          path: ${{ runner.temp }}/displaylab-idd/package
