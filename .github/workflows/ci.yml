@@ -137,6 +137,8 @@ jobs:
       - run: cargo build -p displaylab
       - name: Build, sign, install and probe the driver
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: ./ci/windows-driver.ps1 -Displaylab target\debug\displaylab.exe
       - uses: actions/upload-artifact@v4
         if: always()

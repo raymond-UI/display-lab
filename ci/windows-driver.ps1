@@ -32,8 +32,23 @@ function Check([bool]$ok, [string]$what) {
 # --- 1. Build -----------------------------------------------------------------
 
 "== Toolchain"
+# The WDK comes from NuGet (driver\windows\packages.config): the hosted image
+# has Visual Studio's driver toolset but not the kit's headers.
+$packages = Join-Path $root 'driver\windows\packages'
+nuget restore (Join-Path $root 'driver\windows\packages.config') -PackagesDirectory $packages -NonInteractive
+Get-ChildItem $packages -Directory | ForEach-Object { "package: $($_.Name)" }
 $kits = "${env:ProgramFiles(x86)}\Windows Kits\10"
-$iddcx = Get-ChildItem "$kits\Include" -Recurse -Filter iddcx.h -ErrorAction SilentlyContinue | Select-Object -First 1
+
+# A tool from the restored packages, else from an installed kit.
+function Tool([string]$name, [string]$arch) {
+    foreach ($dir in @($packages, "$kits\bin", "$kits\Tools")) {
+        $found = Get-ChildItem $dir -Recurse -Filter $name -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -like "*\$arch\*" } | Sort-Object FullName -Descending | Select-Object -First 1
+        if ($found) { return $found.FullName }
+    }
+    return $null
+}
+$iddcx = Get-ChildItem $packages, "$kits\Include" -Recurse -Filter iddcx.h -ErrorAction SilentlyContinue | Select-Object -First 1
 "iddcx.h: $($iddcx.FullName)"
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 $msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
@@ -66,9 +81,8 @@ $pkg = Join-Path $work 'package'
 New-Item -ItemType Directory -Force -Path $pkg | Out-Null
 Copy-Item $dll.FullName, $inf.FullName $pkg
 
-$bin = Get-ChildItem "$kits\bin" -Directory | Where-Object { $_.Name -like '10.*' } | Sort-Object Name -Descending | Select-Object -First 1
-$signtool = Join-Path $bin.FullName 'x64\signtool.exe'
-$inf2cat = Join-Path $bin.FullName 'x86\inf2cat.exe'
+$signtool = Tool 'signtool.exe' 'x64'
+$inf2cat = Tool 'inf2cat.exe' 'x86'
 "signtool: $signtool"
 "inf2cat: $inf2cat"
 
@@ -88,10 +102,16 @@ Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\TrustedP
 Check ((Get-AuthenticodeSignature (Join-Path $pkg 'DisplayLabIdd.cat')).Status -eq 'Valid') 'the catalog is signed and trusted'
 
 "== Install"
-$devcon = Get-ChildItem "$kits\Tools" -Recurse -Filter devcon.exe -ErrorAction SilentlyContinue |
-    Where-Object { $_.FullName -like '*x64*' } | Select-Object -First 1
-"devcon: $($devcon.FullName)"
-$p = Start-Process -FilePath $devcon.FullName -ArgumentList 'install', (Join-Path $pkg 'DisplayLabIdd.inf'), 'Root\DisplayLabIdd' `
+$devcon = Tool 'devcon.exe' 'x64'
+if (-not $devcon) {
+    # devcon creates the root device the INF binds to. The kit may not carry
+    # it; the Virtual Display Driver release bundles Microsoft's.
+    gh release download -R VirtualDrivers/Virtual-Display-Driver --dir "$work\vdd" --pattern '*.zip'
+    Get-ChildItem "$work\vdd" -Filter *.zip | ForEach-Object { Expand-Archive -Force $_.FullName -DestinationPath "$work\vdd\$($_.BaseName)" }
+    $devcon = (Get-ChildItem "$work\vdd" -Recurse -Filter devcon.exe | Select-Object -First 1).FullName
+}
+"devcon: $devcon"
+$p = Start-Process -FilePath $devcon -ArgumentList 'install', (Join-Path $pkg 'DisplayLabIdd.inf'), 'Root\DisplayLabIdd' `
     -RedirectStandardOutput "$work\devcon.out" -RedirectStandardError "$work\devcon.err" -PassThru -NoNewWindow
 if (-not $p.WaitForExit(180000)) {
     'devcon HUNG; windows with a title:'
