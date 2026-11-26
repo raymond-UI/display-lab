@@ -157,3 +157,62 @@ pub fn host_now_ns() -> u64 {
     // SAFETY: a valid clock id; the call has no other preconditions.
     unsafe { clock_gettime_nsec_np(CLOCK_UPTIME_RAW) }
 }
+
+unsafe extern "C" {
+    fn proc_pidpath(pid: i32, buffer: *mut c_void, buffersize: u32) -> i32;
+    fn proc_pidinfo(pid: i32, flavor: i32, arg: u64, buffer: *mut c_void, buffersize: i32) -> i32;
+}
+
+/// `PROC_PIDPATHINFO_MAXSIZE` in `<sys/proc_info.h>`.
+const PROC_PIDPATHINFO_MAXSIZE: usize = 4 * 1024;
+/// `PROC_PIDT_SHORTBSDINFO` in `<sys/proc_info.h>`.
+const PROC_PIDT_SHORTBSDINFO: i32 = 13;
+
+/// `struct proc_bsdshortinfo`. Only the parent id is read.
+#[repr(C)]
+#[derive(Default)]
+struct ProcBsdShortInfo {
+    _pid: u32,
+    ppid: u32,
+    _pgid: u32,
+    _status: u32,
+    _comm: [u8; 16],
+    _flags: u32,
+    _uid: u32,
+    _gid: u32,
+    _ruid: u32,
+    _rgid: u32,
+    _svuid: u32,
+    _svgid: u32,
+    _rfu: u32,
+}
+
+/// The executable a process runs, or `None` if it is gone or not ours to see.
+pub fn process_path(pid: i32) -> Option<std::path::PathBuf> {
+    let mut buf = vec![0u8; PROC_PIDPATHINFO_MAXSIZE];
+    // SAFETY: the buffer holds PROC_PIDPATHINFO_MAXSIZE bytes, as passed.
+    let len = unsafe { proc_pidpath(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
+    if len <= 0 {
+        return None;
+    }
+    buf.truncate(len as usize);
+    use std::os::unix::ffi::OsStringExt;
+    Some(std::ffi::OsString::from_vec(buf).into())
+}
+
+/// A process's parent, or `None` if it cannot be read.
+pub fn parent_pid(pid: i32) -> Option<i32> {
+    let mut info = ProcBsdShortInfo::default();
+    let size = std::mem::size_of::<ProcBsdShortInfo>() as i32;
+    // SAFETY: `info` is a `proc_bsdshortinfo` of exactly `size` bytes.
+    let got = unsafe {
+        proc_pidinfo(
+            pid,
+            PROC_PIDT_SHORTBSDINFO,
+            0,
+            (&mut info as *mut ProcBsdShortInfo).cast(),
+            size,
+        )
+    };
+    (got == size).then_some(info.ppid as i32)
+}

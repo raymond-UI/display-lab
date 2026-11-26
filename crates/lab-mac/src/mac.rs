@@ -1,6 +1,6 @@
 //! The macOS backend proper. See the crate docs for the facts it rests on.
 
-use crate::cg;
+use crate::{cg, permission};
 use lab_core::{
     now_ns, Backend, BackendError, Capture, Displays, Frame, Identity, Mode, Profile, ScreenId,
     ScreenInfo,
@@ -63,23 +63,30 @@ pub fn backend() -> Result<Backend, BackendError> {
     ))
 }
 
-/// What to do when Screen Recording is not allowed, naming the terminal app
-/// when it can be told.
+/// What to do when Screen Recording is not allowed, naming the app that
+/// holds the permission when it can be told.
 fn screen_recording_help() -> String {
-    let app = match std::env::var("TERM_PROGRAM").as_deref() {
-        Ok("Apple_Terminal") => "Terminal".to_string(),
-        Ok("iTerm.app") => "iTerm".to_string(),
-        Ok("ghostty") => "Ghostty".to_string(),
-        Ok("vscode") => "Visual Studio Code (or Cursor)".to_string(),
-        Ok("WarpTerminal") => "Warp".to_string(),
-        Ok(other) if !other.is_empty() => other.to_string(),
-        _ => "the app you are running displaylab from".to_string(),
-    };
-    format!(
-        "Display Lab needs the Screen Recording permission to watch the screens.\n  \
-         Open System Settings > Privacy & Security > Screen & System Audio Recording,\n  \
-         turn on {app}, then quit and reopen it and run this again."
-    )
+    let app = permission::app_from_ancestors(ancestor_paths()).or_else(|| {
+        permission::app_from_term_program(std::env::var("TERM_PROGRAM").ok().as_deref())
+    });
+    permission::help(app.as_deref())
+}
+
+/// The executables of this process and each of its parents, up to launchd.
+fn ancestor_paths() -> Vec<std::path::PathBuf> {
+    let mut paths = Vec::new();
+    let mut pid = std::process::id() as i32;
+    // A bound, in case a parent chain is ever cyclic or absurdly deep.
+    for _ in 0..64 {
+        if let Some(path) = cg::process_path(pid) {
+            paths.push(path);
+        }
+        match cg::parent_pid(pid) {
+            Some(parent) if parent > 1 && parent != pid => pid = parent,
+            _ => break,
+        }
+    }
+    paths
 }
 
 struct MacDisplays {

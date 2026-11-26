@@ -31,6 +31,8 @@ use lab_core::{Backend, BackendError};
 mod cg;
 #[cfg(target_os = "macos")]
 mod mac;
+#[cfg(any(target_os = "macos", test))]
+mod permission;
 pub mod screen_host;
 
 /// The display and capture halves of the macOS backend. They share one
