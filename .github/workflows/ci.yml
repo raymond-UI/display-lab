@@ -140,8 +140,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./ci/windows-driver.ps1 -Displaylab target\debug\displaylab.exe
+      - name: A desktop colour the screens can show
+        shell: pwsh
+        run: |
+          # A wallpaper-less black desktop would read as a blank screen.
+          Add-Type -Namespace Lab -Name Desk -MemberDefinition @'
+          [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern bool SystemParametersInfo(int action, int param, string value, int flags);
+          [DllImport("user32.dll")] public static extern bool SetSysColors(int count, int[] elements, int[] colors);
+          '@
+          [Lab.Desk]::SystemParametersInfo(0x14, 0, "", 3) | Out-Null   # no wallpaper
+          [Lab.Desk]::SetSysColors(1, @(1), @(0x00B16300)) | Out-Null    # desktop: blue
+      - name: Smoke test on the real backend
+        env:
+          DISPLAYLAB_DEBUG: "1"
+        run: target\debug\displaylab.exe run --backend windows --out out smoke
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: windows-driver-package
-          path: ${{ runner.temp }}/displaylab-idd/package
+          path: |
+            ${{ runner.temp }}/displaylab-idd/package
+            out
