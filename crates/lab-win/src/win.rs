@@ -57,7 +57,7 @@ fn debug() -> bool {
 // ---- the driver -----------------------------------------------------------
 
 /// One request to the driver: open the pipe, send a line, read the answer.
-fn request(line: &str) -> Result<String, BackendError> {
+pub(crate) fn request(line: &str) -> Result<String, BackendError> {
     let deadline = Instant::now() + Duration::from_secs(5);
     let not_found_deadline = Instant::now() + Duration::from_millis(1500);
     let pipe = loop {

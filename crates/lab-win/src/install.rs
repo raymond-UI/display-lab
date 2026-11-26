@@ -8,8 +8,6 @@
 //!
 //! All of it needs an administrator terminal.
 
-use crate::display::{parse_reply, PIPE};
-use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -200,17 +198,7 @@ pub fn uninstall() -> Result<String, InstallError> {
 }
 
 fn ping() -> Result<String, String> {
-    let pipe = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(PIPE)
-        .map_err(|e| e.to_string())?;
-    (&pipe).write_all(b"PING\n").map_err(|e| e.to_string())?;
-    let mut line = String::new();
-    BufReader::new(&pipe)
-        .read_line(&mut line)
-        .map_err(|e| e.to_string())?;
-    parse_reply(&line)
+    crate::win::request("PING").map_err(|e| e.to_string())
 }
 
 /// Device-info entries for every DisplayLabIdd device, present or not.
