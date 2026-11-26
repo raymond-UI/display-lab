@@ -1,7 +1,9 @@
 # Builds the installable binaries.
 #
 # A tag like v0.2.0 publishes a GitHub release with one archive per platform
-# and a .sha256 next to each; install.sh downloads from there. Running the
+# and a .sha256 next to each; install.sh downloads from there. The tag can be
+# pushed, or made on GitHub's "Draft a new release" page; either way the
+# binaries are attached to that release. Running the
 # workflow by hand builds the same archives as workflow artifacts, without
 # releasing anything.
 name: release
@@ -103,5 +105,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ls -l dist
-          gh release create "$GITHUB_REF_NAME" dist/* \
-            --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+          # A release made on GitHub's "Draft a new release" page already
+          # exists by now; add the binaries to it. A pushed tag has none yet.
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+          fi
