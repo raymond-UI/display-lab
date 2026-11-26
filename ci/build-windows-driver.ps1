@@ -14,6 +14,7 @@ param(
     [string]$PfxPassword = ''
 )
 
+# (PowerShell names are not case-sensitive: nothing below may be called $out.)
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
 $work = Join-Path ([System.IO.Path]::GetTempPath()) 'displaylab-idd-build'
@@ -48,10 +49,10 @@ $toolset = Get-ChildItem -Recurse -Directory -ErrorAction SilentlyContinue `
 
 "== Build"
 $proj = Join-Path $root 'driver\windows\DisplayLabIdd.vcxproj'
-$out = Join-Path $work 'build\'
-& $msbuild $proj /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:OutDir=$out" "/p:IntDir=$work\obj\"
+$buildDir = Join-Path $work 'build\'
+& $msbuild $proj /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:OutDir=$buildDir" "/p:IntDir=$work\obj\"
 if ($LASTEXITCODE -ne 0) { "the driver did not build"; exit 1 }
-$dll = Get-ChildItem -Recurse $out -Filter DisplayLabIdd.dll | Select-Object -First 1
+$dll = Get-ChildItem -Recurse $buildDir -Filter DisplayLabIdd.dll | Select-Object -First 1
 if (-not $dll) { "the build produced no DisplayLabIdd.dll"; exit 1 }
 
 "== Stamp the INF"
