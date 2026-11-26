@@ -18,6 +18,7 @@ lab-adapter.workspace = true
 lab-core.workspace = true
 lab-fake.workspace = true
 lab-mac.workspace = true
+lab-mcp.workspace = true
 lab-runner.workspace = true
 lab-win.workspace = true
 serde_json.workspace = true

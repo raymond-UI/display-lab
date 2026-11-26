@@ -1,0 +1,44 @@
+# A starting point for driving an app through its own MCP server.
+# Copy it next to your scenarios, rename the tools to your app's, and delete
+# the sections your app cannot answer. See docs/MCP.md.
+#
+#   displaylab run --adapter mcp:app.mcp.toml scenarios/catalogue/*.toml
+
+[app]
+name = "My App"
+# Leave out `launch` if you start the app yourself.
+launch = ["/Applications/My App.app/Contents/MacOS/My App"]
+ready = { tool = "get_version" }
+ready_timeout_s = 30
+
+[server]
+url = "http://127.0.0.1:8000/mcp"
+# command = ["my-app-mcp", "--stdio"]   # instead of url, for a stdio server
+timeout_s = 60
+
+# The catalogue scenarios only send `next`. Add any action your own
+# scenarios use; input arguments become $variables.
+[actions]
+next = { tool = "next_slide" }
+previous = { tool = "previous_slide" }
+go_to = { tool = "go_to_slide", args = { index = "$slide" } }
+
+# Everything below is optional. Each section turns on one kind of check.
+
+[state]
+tool = "get_state"
+
+[outputs]
+tool = "list_outputs"
+list = "/outputs"
+key = "/role"
+names = { audience = "main", stage = "presenter" }
+
+[bindings]
+name = "/display/name"
+x = "/display/x"
+y = "/display/y"
+
+[expected_frame]
+tool = "render_output"
+args = { output = "$output.id", width = "$width", height = "$height" }

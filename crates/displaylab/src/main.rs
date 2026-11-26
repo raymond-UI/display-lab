@@ -40,8 +40,10 @@ enum Command {
         /// Which screens to use. `native` is this machine's own backend.
         #[arg(long, value_enum, default_value_t = BackendChoice::Native)]
         backend: BackendChoice,
-        /// The app's adapter command, e.g. `--adapter "node adapter.js"`.
-        /// Not used with the fake backend, which brings its own app.
+        /// The app's adapter: a command (`--adapter "node adapter.js"`), or
+        /// `mcp:<file>` to drive an app's own MCP server from a config file
+        /// (`--adapter mcp:my-app.mcp.toml`). Not used with the fake backend,
+        /// which brings its own app.
         #[arg(long)]
         adapter: Option<String>,
         /// Make the fake app misbehave: ignore-hotplug, bind-by-name,
@@ -219,8 +221,17 @@ fn run_one(
             (Box::new(d), Box::new(c), Box::new(a))
         }
         real => {
-            let Some(command) = adapter else {
-                bail!("a real backend needs the app's adapter: --adapter \"<command>\"");
+            let Some(spec) = adapter else {
+                bail!("a real backend needs the app's adapter: --adapter \"<command>\" or --adapter mcp:<file>");
+            };
+            // Load the adapter's config before touching any screen, so a
+            // bad file costs nothing.
+            let mcp = match spec.strip_prefix("mcp:") {
+                Some(file) => Some(
+                    lab_mcp::McpAdapter::load(Path::new(file))
+                        .with_context(|| format!("loading MCP adapter config {file:?}"))?,
+                ),
+                None => None,
             };
             let (d, c) = match real {
                 BackendChoice::Mac => lab_mac::backend(),
@@ -228,10 +239,17 @@ fn run_one(
                 _ => bail!("this machine has no native display backend; use --backend fake"),
             }
             .context("starting the display backend")?;
-            let words = split_command(command)?;
-            let app = RpcAdapter::spawn(&words)
-                .with_context(|| format!("starting adapter {command:?}"))?;
-            (d, c, Box::new(app))
+            let app: Box<dyn Adapter> = match mcp {
+                Some(mcp) => Box::new(mcp),
+                None => {
+                    let words = split_command(spec)?;
+                    Box::new(
+                        RpcAdapter::spawn(&words)
+                            .with_context(|| format!("starting adapter {spec:?}"))?,
+                    )
+                }
+            };
+            (d, c, app)
         }
     };
 

@@ -6,6 +6,7 @@ members = [
     "crates/lab-adapter",
     "crates/lab-fake",
     "crates/lab-runner",
+    "crates/lab-mcp",
     "crates/lab-mac",
     "crates/lab-win",
     "crates/displaylab",
@@ -24,6 +25,7 @@ lab-compare = { path = "crates/lab-compare" }
 lab-adapter = { path = "crates/lab-adapter" }
 lab-fake = { path = "crates/lab-fake" }
 lab-runner = { path = "crates/lab-runner" }
+lab-mcp = { path = "crates/lab-mcp" }
 lab-mac = { path = "crates/lab-mac" }
 lab-win = { path = "crates/lab-win" }
 

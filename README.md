@@ -4,7 +4,7 @@ Test what an app puts on the screens.
 
 Display Lab fakes real display setups (a 4:3 projector, a stage monitor, a projector that wakes late, a cable pulled mid-presentation), drives the app under test, watches every screen, and fails loudly when the picture is wrong, late, or on the wrong screen.
 
-It works with any desktop app. Everything app-specific sits behind one **adapter**, a small program in any language that speaks a line-based JSON-RPC protocol over stdio.
+It works with any desktop app. Everything app-specific sits behind one **adapter**: a small program in any language that speaks a line-based JSON-RPC protocol over stdio, or, if your app already has an MCP server, just a TOML file that maps the lab's requests to your app's tools.
 
 ## Quick start
 
@@ -19,6 +19,9 @@ cargo build --workspace
 
 # On a Mac, against your own app:
 ./target/debug/displaylab run --adapter "node my-adapter.js" scenarios/catalogue/cable-pull.toml
+
+# Or, if your app has an MCP server, with no adapter code at all:
+./target/debug/displaylab run --adapter mcp:my-app.mcp.toml scenarios/catalogue/*.toml
 ```
 
 Each run writes `out/<scenario>/report.md`, `report.json`, and the captured, expected and diff frames for any step that failed. Exit code 0 means every scenario passed, 1 means one failed, and 2 means the lab itself could not run (a bad file, a missing backend, an adapter that would not start).
@@ -37,6 +40,7 @@ displaylab validate scenarios/**/*.toml   # check files without running anything
 | `lab-core` | Profiles, scenarios, frames, and the `Displays` and `Capture` traits every backend implements. One monotonic clock for the whole lab. |
 | `lab-compare` | SSIM plus a CIE76 ΔE budget, with thresholds proven on a production render pipeline. Blank and change checks. PNG in and out. |
 | `lab-adapter` | The adapter protocol, the `Adapter` trait, a client that spawns adapter processes, and `serve` for adapters written in Rust. |
+| `lab-mcp` | The built-in MCP adapter: drives an app through its own MCP server (Streamable HTTP or stdio) from a TOML mapping. |
 | `lab-runner` | Plays a scenario against a backend and an adapter. Every wait is a poll against a deadline, never a fixed sleep. Writes the report. |
 | `lab-fake` | In-memory screens and a fake presenter with real binding rules and switchable bugs. How the lab tests itself. |
 | `lab-mac` | `CGVirtualDisplay` screens, one host process each, and ScreenCaptureKit capture. |
@@ -47,8 +51,9 @@ displaylab validate scenarios/**/*.toml   # check files without running anything
 
 | Part | State |
 | --- | --- |
-| Core, compare, adapter protocol, runner, report, CLI | Built and tested on Linux (55 tests, clippy clean) |
+| Core, compare, adapter protocol, runner, report, CLI | Built and tested on Linux (72 tests across the workspace, clippy clean) |
 | Fake backend and fake presenter | Built and tested; the full catalogue passes, and fails as expected with bugs injected |
+| MCP adapter | Built and tested: every shipped scenario passes with the fake presenter behind an MCP server, and every injected bug is still caught |
 | macOS backend | Runs on GitHub's hosted macOS 26 runners: plugs virtual screens with the requested identity, captures them, unplugs and replugs in a new mode (`macos-virtual-screen`) |
 | Windows backend | Not written. CI shows a hosted runner can install the Virtual Display Driver and gets a new monitor, but the driver takes one EDID for every screen, so per-screen identities need a fork |
 
@@ -56,7 +61,9 @@ displaylab validate scenarios/**/*.toml   # check files without running anything
 
 - [docs/SCENARIOS.md](docs/SCENARIOS.md): the scenario file format and every step.
 - [docs/PROTOCOL.md](docs/PROTOCOL.md): the adapter protocol.
+- [docs/MCP.md](docs/MCP.md): the MCP adapter, for apps that already have an MCP server.
 - [adapters/example-python](adapters/example-python/adapter.py): a dependency-free adapter template.
+- [adapters/example-mcp](adapters/example-mcp/app.mcp.toml): a starting MCP config.
 
 `scenarios/catalogue` holds scenarios that work for any app: they only look at the screens and send the standard `next` action. `scenarios/fake-presenter` shows the app-aware checks (bindings, expected frames, state) in the fake app's vocabulary. A real app keeps scenarios like those next to its own adapter.
 

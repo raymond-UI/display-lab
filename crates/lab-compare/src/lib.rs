@@ -12,4 +12,4 @@ mod image;
 
 pub use checks::{differs, is_blank, BLANK_LEVEL, CHANGE_TOLERANCE};
 pub use compare::{compare, diff_image, mean_ssim, Comparison, SizeMismatch, Thresholds};
-pub use image::{load_png, save_png, ImageError};
+pub use image::{decode_png, encode_png, load_png, save_png, ImageError};

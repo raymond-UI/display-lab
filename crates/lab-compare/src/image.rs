@@ -29,15 +29,22 @@ pub enum ImageError {
 
 pub fn load_png(path: &Path) -> Result<Frame, ImageError> {
     let shown = path.display().to_string();
-    let file = std::fs::File::open(path).map_err(|source| ImageError::Io {
+    let bytes = std::fs::read(path).map_err(|source| ImageError::Io {
         path: shown.clone(),
         source,
     })?;
+    decode_png(&bytes, &shown)
+}
+
+/// A PNG held in memory, such as an image an app sent back over MCP.
+/// `label` names it in errors.
+pub fn decode_png(bytes: &[u8], label: &str) -> Result<Frame, ImageError> {
+    let shown = label.to_string();
     let decode = |source| ImageError::Decode {
         path: shown.clone(),
         source,
     };
-    let mut decoder = png::Decoder::new(std::io::BufReader::new(file));
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::normalize_to_color8());
     let mut reader = decoder.read_info().map_err(decode)?;
     let mut buf = vec![0; reader.output_buffer_size()];
@@ -66,6 +73,29 @@ pub fn load_png(path: &Path) -> Result<Frame, ImageError> {
         return Err(ImageError::Shape(format!("{shown}: malformed image")));
     }
     Ok(frame)
+}
+
+/// `frame` as PNG bytes.
+pub fn encode_png(frame: &Frame) -> Result<Vec<u8>, ImageError> {
+    if !frame.is_well_formed() {
+        return Err(ImageError::Shape(
+            "frame buffer does not match its size".into(),
+        ));
+    }
+    let mut out = Vec::new();
+    let mut encoder = png::Encoder::new(&mut out, frame.width, frame.height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let encode = |source| ImageError::Encode {
+        path: "in-memory PNG".into(),
+        source,
+    };
+    encoder
+        .write_header()
+        .map_err(encode)?
+        .write_image_data(&frame.rgba)
+        .map_err(encode)?;
+    Ok(out)
 }
 
 pub fn save_png(frame: &Frame, path: &Path) -> Result<(), ImageError> {
@@ -133,6 +163,14 @@ mod tests {
         let loaded = load_png(&path).unwrap();
         assert!(original.same_pixels(&loaded));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn round_trips_in_memory() {
+        let original = Frame::solid(4, 3, [9, 8, 7, 255]);
+        let bytes = encode_png(&original).unwrap();
+        assert!(decode_png(&bytes, "x").unwrap().same_pixels(&original));
+        assert!(decode_png(b"not a png", "x").is_err());
     }
 
     #[test]

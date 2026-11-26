@@ -2,6 +2,8 @@
 
 An adapter is the one piece of Display Lab written per app. It launches the app, sends it input, and optionally reports what the app is doing.
 
+If your app already has an MCP server, you may not need one: the built-in MCP adapter maps lab requests to your app's tools from a TOML file. See [MCP.md](MCP.md).
+
 The lab starts the adapter as a child process and talks to it over **JSON-RPC 2.0 on stdin and stdout, one message per line**. The adapter's stderr is passed through to the lab's, so log there. Anything on stdout that is not a protocol message is an error.
 
 Requests arrive one at a time. The lab waits up to 30 s for each answer.
@@ -115,3 +117,4 @@ An error fails the step that caused it, with your message in the report.
 
 - Python, no dependencies: [adapters/example-python/adapter.py](../adapters/example-python/adapter.py)
 - Rust: implement `lab_adapter::Adapter` and call `lab_adapter::serve(adapter, stdin, stdout)`.
+- No code, for apps with an MCP server: [adapters/example-mcp/app.mcp.toml](../adapters/example-mcp/app.mcp.toml), described in [MCP.md](MCP.md).
