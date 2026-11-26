@@ -1,10 +1,10 @@
 # Build, sign, install and probe the Display Lab display driver on a hosted
 # Windows runner.
 #
-# What it has to prove before the Rust backend is worth writing:
+# What it proves:
 #   1. The driver builds with what the runner image has.
-#   2. A driver signed with our own certificate installs once that
-#      certificate is trusted: no Microsoft signing, no test mode.
+#   2. A driver signed with our own certificate installs with
+#      `displaylab driver install`: no Microsoft signing, no test mode.
 #   3. Two screens plugged with different EDIDs show up as two identities.
 #   4. Unplugging one leaves the other where it was.
 #
@@ -29,104 +29,17 @@ function Check([bool]$ok, [string]$what) {
 [System.Environment]::OSVersion.VersionString
 "session id: " + (Get-Process -Id $PID).SessionId
 
-# --- 1. Build -----------------------------------------------------------------
-
-"== Toolchain"
-# The WDK comes from NuGet (driver\windows\packages.config): the hosted image
-# has Visual Studio's driver toolset but not the kit's headers.
-$packages = Join-Path $root 'driver\windows\packages'
-nuget restore (Join-Path $root 'driver\windows\packages.config') -PackagesDirectory $packages -NonInteractive
-Get-ChildItem $packages -Directory | ForEach-Object { "package: $($_.Name)" }
-$kits = "${env:ProgramFiles(x86)}\Windows Kits\10"
-
-# A tool from the restored packages, else from an installed kit.
-function Tool([string]$name, [string]$arch) {
-    foreach ($dir in @($packages, "$kits\bin", "$kits\Tools")) {
-        $found = Get-ChildItem $dir -Recurse -Filter $name -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -like "*\$arch\*" } | Sort-Object FullName -Descending | Select-Object -First 1
-        if ($found) { return $found.FullName }
-    }
-    return $null
-}
-$iddcx = Get-ChildItem $packages, "$kits\Include" -Recurse -Filter iddcx.h -ErrorAction SilentlyContinue | Select-Object -First 1
-"iddcx.h: $($iddcx.FullName)"
-$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-$msbuild = & $vswhere -latest -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
-"msbuild: $msbuild"
-$toolset = Get-ChildItem -Recurse -Directory -ErrorAction SilentlyContinue `
-    (Join-Path (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $msbuild))) 'Microsoft\VC') -Filter 'WindowsUserModeDriver10.0' |
-    Select-Object -First 1
-"driver toolset: $($toolset.FullName)"
-
-"== Build"
-$proj = Join-Path $root 'driver\windows\DisplayLabIdd.vcxproj'
-$out = Join-Path $work 'build\'
-& $msbuild $proj /nologo /v:minimal /p:Configuration=Release /p:Platform=x64 "/p:OutDir=$out" "/p:IntDir=$work\obj\"
-Check ($LASTEXITCODE -eq 0) 'the driver builds'
-Get-ChildItem -Recurse $out | ForEach-Object { $_.FullName }
-
-$dll = Get-ChildItem -Recurse $out -Filter DisplayLabIdd.dll | Select-Object -First 1
-if (-not $dll) {
-    Check $false 'the build produced DisplayLabIdd.dll'
-    "== Summary"; $failures | ForEach-Object { "FAIL  $_" }; exit 1
-}
-
-"== Stamp the INF"
-# What stampinf would do: the version, the architecture, the UMDF version
-# the project builds against (UMDF_VERSION_MAJOR/MINOR in the vcxproj).
-$version = "1.0.$((Get-Date).ToString('yyMM')).$((Get-Date).ToString('ddHH'))"
-$stamped = (Get-Content (Join-Path $root 'driver\windows\DisplayLabIdd.inf') -Raw).
-    Replace('DriverVer=', "DriverVer=$((Get-Date).ToString('MM/dd/yyyy')),$version").
-    Replace('$ARCH$', 'amd64').
-    Replace('$UMDFVERSION$', '2.25.0')
-$inf = Join-Path $work 'DisplayLabIdd.inf'
-Set-Content -Path $inf -Value $stamped -Encoding ascii
-Get-Content $inf | Select-String 'DriverVer|UmdfLibraryVersion|NTamd64'
-
-# --- 2. Sign with our own certificate, trust it, install ----------------------
+# --- 1 and 2. Build, sign, install with displaylab's own installer ----------
 
 $pkg = Join-Path $work 'package'
-New-Item -ItemType Directory -Force -Path $pkg | Out-Null
-Copy-Item $dll.FullName, $inf $pkg
-
-$signtool = Tool 'signtool.exe' 'x64'
-$inf2cat = Tool 'inf2cat.exe' 'x86'
-"signtool: $signtool"
-"inf2cat: $inf2cat"
-
-"== Certificate"
-$cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=Display Lab driver (CI)' `
-    -CertStoreLocation Cert:\CurrentUser\My -KeyUsage DigitalSignature -NotAfter (Get-Date).AddDays(2)
-$cer = Join-Path $work 'displaylab-ci.cer'
-Export-Certificate -Cert $cert -FilePath $cer | Out-Null
-Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
-Import-Certificate -FilePath $cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher | Out-Null
-"thumbprint $($cert.Thumbprint)"
-
-"== Sign"
-& $signtool sign /fd sha256 /sha1 $cert.Thumbprint /s My (Join-Path $pkg 'DisplayLabIdd.dll')
-& $inf2cat "/driver:$pkg" '/os:10_x64,Server10_x64,10_NI_X64,10_GE_X64' /uselocaltime
-& $signtool sign /fd sha256 /sha1 $cert.Thumbprint /s My (Join-Path $pkg 'DisplayLabIdd.cat')
-Check ((Get-AuthenticodeSignature (Join-Path $pkg 'DisplayLabIdd.cat')).Status -eq 'Valid') 'the catalog is signed and trusted'
+& (Join-Path $PSScriptRoot 'build-windows-driver.ps1') -Out $pkg
+Check ($LASTEXITCODE -eq 0) 'the driver builds and is signed'
 
 "== Install"
-$devcon = Tool 'devcon.exe' 'x64'
-if (-not $devcon) {
-    # devcon creates the root device the INF binds to. The kit may not carry
-    # it; the Virtual Display Driver release bundles Microsoft's.
-    gh release download -R VirtualDrivers/Virtual-Display-Driver --dir "$work\vdd" --pattern '*.zip'
-    Get-ChildItem "$work\vdd" -Filter *.zip | ForEach-Object { Expand-Archive -Force $_.FullName -DestinationPath "$work\vdd\$($_.BaseName)" }
-    $devcon = (Get-ChildItem "$work\vdd" -Recurse -Filter devcon.exe | Select-Object -First 1).FullName
-}
-"devcon: $devcon"
-$p = Start-Process -FilePath $devcon -ArgumentList 'install', (Join-Path $pkg 'DisplayLabIdd.inf'), 'Root\DisplayLabIdd' `
-    -RedirectStandardOutput "$work\devcon.out" -RedirectStandardError "$work\devcon.err" -PassThru -NoNewWindow
-if (-not $p.WaitForExit(180000)) {
-    'devcon HUNG; windows with a title:'
-    Get-Process | Where-Object { $_.MainWindowTitle } | Format-Table -AutoSize Id, ProcessName, MainWindowTitle
-    Stop-Process -Id $p.Id -Force
-}
-Get-Content "$work\devcon.out", "$work\devcon.err" -ErrorAction SilentlyContinue
+& $Displaylab driver install --from $pkg
+Check ($LASTEXITCODE -eq 0) 'displaylab driver install installs it'
+Check ((Get-AuthenticodeSignature (Join-Path $pkg 'DisplayLabIdd.cat')).Status -eq 'Valid') 'the catalog is signed and now trusted'
+"status: $(& $Displaylab driver status)"
 Get-PnpDevice -FriendlyName 'Display Lab Virtual Screens' -ErrorAction SilentlyContinue | Format-Table -AutoSize Status, Class, FriendlyName, InstanceId
 
 # --- 3 and 4. Plug and unplug -------------------------------------------------
@@ -280,7 +193,6 @@ Check (WaitFor { @(Monitors).Count -eq $baseline -and @(Desktop).Count -eq 1 }) 
 Show 'at the end'
 
 "== Driver package"
-Copy-Item $cer $pkg
 Get-ChildItem $pkg | ForEach-Object { $_.FullName }
 
 "== Summary"

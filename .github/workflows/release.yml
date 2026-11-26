@@ -74,6 +74,25 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --release --locked -p displaylab
+      - name: The display driver
+        shell: pwsh
+        env:
+          PFX: ${{ secrets.WINDOWS_DRIVER_PFX }}
+          PFX_PASSWORD: ${{ secrets.WINDOWS_DRIVER_PFX_PASSWORD }}
+        run: |
+          # Signed with the project's certificate, kept as a repository
+          # secret (ci/new-driver-certificate.ps1 makes one). Without it the
+          # release still ships, without virtual screens on Windows.
+          if (-not $env:PFX) {
+            "::warning::WINDOWS_DRIVER_PFX is not set, so this release has no Windows display driver"
+            exit 0
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP 'driver.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX))
+          ./ci/build-windows-driver.ps1 -Out dist/pkg/driver -Pfx $pfx -PfxPassword $env:PFX_PASSWORD
+          $code = $LASTEXITCODE
+          Remove-Item $pfx
+          exit $code
       - name: Package
         shell: pwsh
         run: |

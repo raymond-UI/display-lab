@@ -43,8 +43,8 @@ use windows::Win32::UI::HiDpi::{
 };
 
 const NOT_INSTALLED: &str = "Display Lab's display driver is not installed, so there are no \
-     virtual screens on this machine. See driver/windows/README.md to install it, or use \
-     --backend fake";
+     virtual screens on this machine. Install it with `displaylab driver install` in an \
+     administrator terminal, or use --backend fake";
 
 fn platform(what: &str, e: impl std::fmt::Display) -> BackendError {
     BackendError::Platform(format!("{what}: {e}"))

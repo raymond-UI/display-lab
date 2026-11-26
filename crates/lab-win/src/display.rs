@@ -142,6 +142,27 @@ pub fn qpc_to_lab_ns(qpc: i64, qpc_now: i64, frequency: i64, lab_now_ns: u64) ->
     (lab_now_ns as i128 - ago_ns).clamp(1, u64::MAX as i128) as u64
 }
 
+/// From `pnputil /enum-drivers`, the published names (`oemNN.inf`) of the
+/// packages whose original INF is `original`.
+pub fn published_infs(enum_drivers: &str, original: &str) -> Vec<String> {
+    let mut out = vec![];
+    let mut published: Option<String> = None;
+    for line in enum_drivers.lines() {
+        let Some((key, value)) = line.split_once(':') else {
+            published = None;
+            continue;
+        };
+        let (key, value) = (key.trim(), value.trim());
+        if key.eq_ignore_ascii_case("Published Name") {
+            published = Some(value.to_string());
+        } else if key.eq_ignore_ascii_case("Original Name") && value.eq_ignore_ascii_case(original)
+        {
+            out.extend(published.take());
+        }
+    }
+    out
+}
+
 /// UTF-16 up to the first NUL.
 pub fn wide(text: &[u16]) -> String {
     let end = text.iter().position(|&c| c == 0).unwrap_or(text.len());
@@ -231,6 +252,17 @@ mod tests {
         assert!(parse_slots("").is_empty());
         assert_eq!(free_slot([0, 1, 3]), Some(2));
         assert_eq!(free_slot(0..SLOTS), None);
+    }
+
+    #[test]
+    fn driver_packages_from_pnputil() {
+        let text = "Microsoft PnP Utility\r\n\r\nPublished Name:     oem3.inf\r\nOriginal Name:      other.inf\r\n\r\n\
+                    Published Name:     oem12.inf\r\nOriginal Name:      DisplayLabIdd.inf\r\nProvider Name:      Display Lab\r\n";
+        assert_eq!(
+            published_infs(text, "displaylabidd.inf"),
+            vec!["oem12.inf".to_string()]
+        );
+        assert!(published_infs("", "x.inf").is_empty());
     }
 
     #[test]

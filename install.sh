@@ -26,7 +26,7 @@ case "$(uname -s)" in
       *) fail "there is no Linux build for $(uname -m) yet" ;;
     esac
     ;;
-  *) fail "on Windows, download displaylab-windows-x86_64.zip from https://github.com/$repo/releases" ;;
+  *) fail "on Windows, download displaylab-windows-x86_64.zip from https://github.com/$repo/releases, unzip it, and run \`displaylab driver install\` in an administrator terminal" ;;
 esac
 
 if [ "$version" = latest ]; then

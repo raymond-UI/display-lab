@@ -154,6 +154,14 @@ jobs:
         env:
           DISPLAYLAB_DEBUG: "1"
         run: target\debug\displaylab.exe run --backend windows --out out smoke
+      - name: Uninstall the driver
+        shell: pwsh
+        run: |
+          target\debug\displaylab.exe driver uninstall
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $status = target\debug\displaylab.exe driver status
+          "status: $status"
+          if ($status -ne 'not installed') { exit 1 }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

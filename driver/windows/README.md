@@ -19,6 +19,19 @@ Slots are 0 to 15. Only SYSTEM, administrators and the interactive user can open
 
 `displaylab __edid <profile> [mode]` prints the `<edid hex> <mode>` arguments for a profile.
 
+## Installing
+
+From a release, in an administrator terminal:
+
+```powershell
+displaylab driver install          # the `driver` folder next to displaylab.exe
+displaylab driver install --from <folder>
+displaylab driver status
+displaylab driver uninstall
+```
+
+`install` trusts the package's certificate (Root and TrustedPublisher), creates the `Root\DisplayLabIdd` device and installs the driver on it, the same steps as `devcon install`, then waits for the driver to answer.
+
 ## Building and signing
 
 Visual Studio with the Windows Driver Kit:
@@ -27,7 +40,9 @@ Visual Studio with the Windows Driver Kit:
 msbuild driver\windows\DisplayLabIdd.vcxproj /p:Configuration=Release /p:Platform=x64
 ```
 
-The build does not sign. An indirect display driver runs in user mode, so it installs with any code-signing certificate the machine trusts (in `Root` and `TrustedPublisher`); it needs no Microsoft signature and no test mode. `ci/windows-driver.ps1` shows the whole sequence: sign the DLL, `inf2cat`, sign the catalog, trust the certificate, `devcon install DisplayLabIdd.inf Root\DisplayLabIdd`.
+The build does not sign. An indirect display driver runs in user mode, so it installs with any code-signing certificate the machine trusts (in `Root` and `TrustedPublisher`); it needs no Microsoft signature and no test mode.
+
+`ci/build-windows-driver.ps1 -Out <folder>` restores the WDK from NuGet, builds, stamps the INF, signs the DLL, makes and signs the catalog, and leaves the package with its `.cer`. Without `-Pfx` it signs with a throwaway certificate, as CI does; releases sign with the project certificate (`ci/new-driver-certificate.ps1` makes one, stored as the `WINDOWS_DRIVER_PFX` secrets).
 
 ## License
 

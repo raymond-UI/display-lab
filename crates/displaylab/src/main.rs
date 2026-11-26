@@ -76,6 +76,28 @@ enum Command {
     Profiles,
     /// List the built-in scenarios.
     Scenarios,
+    /// Windows: install, check or remove the display driver that gives the
+    /// lab its virtual screens.
+    Driver {
+        #[command(subcommand)]
+        action: DriverAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum DriverAction {
+    /// Install it (administrator terminal). Trusts the certificate the
+    /// driver is signed with, for code signing on this machine.
+    Install {
+        /// The driver package; by default the `driver` folder next to
+        /// displaylab.exe, as the release zip has it.
+        #[arg(long)]
+        from: Option<PathBuf>,
+    },
+    /// Whether it is installed and answering.
+    Status,
+    /// Remove it, its device and its certificate (administrator terminal).
+    Uninstall,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -119,8 +141,26 @@ fn main() -> ExitCode {
 }
 
 fn dispatch(cli: Cli) -> Result<ExitCode> {
+    if let Command::Driver { action } = &cli.command {
+        let done = match action {
+            DriverAction::Install { from } => {
+                let dir = match from {
+                    Some(dir) => dir.clone(),
+                    None => std::env::current_exe()
+                        .context("locating displaylab")?
+                        .with_file_name("driver"),
+                };
+                lab_win::driver::install(&dir)?
+            }
+            DriverAction::Status => lab_win::driver::status()?,
+            DriverAction::Uninstall => lab_win::driver::uninstall()?,
+        };
+        println!("{done}");
+        return Ok(ExitCode::SUCCESS);
+    }
     let profiles = load_profiles(cli.profiles.as_deref())?;
     match cli.command {
+        Command::Driver { .. } => unreachable!("handled above"),
         Command::Scenarios => {
             let mut group = "";
             for (g, stem, text) in builtin::SCENARIOS {

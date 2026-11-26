@@ -58,18 +58,18 @@ cargo build --release -p displaylab   # target/release/displaylab
 | `lab-runner` | Plays a scenario against a backend and an adapter. Every wait is a poll against a deadline, never a fixed sleep. Writes the report. |
 | `lab-fake` | In-memory screens and a fake presenter with real binding rules and switchable bugs. How the lab tests itself. |
 | `lab-mac` | `CGVirtualDisplay` screens, one host process each, and ScreenCaptureKit capture. |
-| `lab-win` | Not written yet. See the crate docs for what must be checked first. |
+| `lab-win` | Screens from Display Lab's own indirect display driver (`driver/windows`), one EDID per screen, and DXGI Desktop Duplication capture. Installs the driver. |
 | `displaylab` | The CLI. |
 
 ## Status
 
 | Part | State |
 | --- | --- |
-| Core, compare, adapter protocol, runner, report, CLI | Built and tested on Linux (80 tests across the workspace, clippy clean) |
+| Core, compare, adapter protocol, runner, report, CLI | Built and tested on Linux (86 tests across the workspace, clippy clean) |
 | Fake backend and fake presenter | Built and tested; the full catalogue passes, and fails as expected with bugs injected |
 | MCP adapter | Built and tested: every shipped scenario passes with the fake presenter behind an MCP server, and every injected bug is still caught |
 | macOS backend | Runs on GitHub's hosted macOS 26 runners: plugs virtual screens with the requested identity, captures them, unplugs and replugs in a new mode (`macos-virtual-screen`) |
-| Windows backend | In progress. Display Lab has its own small display driver (`driver/windows`) that plugs and unplugs one screen at a time, each with its own EDID; the Rust backend that drives it comes next |
+| Windows backend | Runs on GitHub's hosted Windows runners: Display Lab's own display driver plugs screens one at a time, each with its own identity, and Desktop Duplication captures them (`windows-display-driver` runs the smoke scenario). Releases include the driver once its signing certificate is set up |
 
 ## Writing scenarios and adapters
 
@@ -93,6 +93,20 @@ cargo build --release -p displaylab   # target/release/displaylab
 | `macos-virtual-screen` | A hosted macOS runner creates, captures, unplugs and replugs a real virtual screen. Grants Screen Recording by writing the TCC database (`ci/grant-screen-recording.sh`), which Apple does not support and a future image may break, so the job cannot fail the run |
 | `windows` | clippy, tests and the catalogue on Windows |
 | `windows-display-driver` | Builds Display Lab's display driver, signs it with a throwaway certificate, installs it, then plugs and unplugs screens and checks each keeps its own identity (`ci/windows-driver.ps1`) |
+
+## Windows notes
+
+- Virtual screens come from Display Lab's own display driver. Install it once, in an administrator terminal:
+
+  ```powershell
+  displaylab driver install     # from the `driver` folder in the release zip
+  displaylab driver status
+  displaylab driver uninstall   # removes the driver, its device and its certificate
+  ```
+
+  Installing trusts the certificate the driver is signed with, for code signing on that machine; the driver runs in user mode and needs no test mode or reboot.
+- A screen's name on Windows is what its EDID holds: the first 13 characters of the profile's name. The lab still reports the full name, and finds each screen by its manufacturer, product and serial.
+- The lab runs as the signed-in user, in their desktop session. Only that user and administrators can plug screens.
 
 ## macOS notes
 
