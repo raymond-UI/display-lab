@@ -66,20 +66,28 @@ Check ($LASTEXITCODE -eq 0) 'the driver builds'
 Get-ChildItem -Recurse $out | ForEach-Object { $_.FullName }
 
 $dll = Get-ChildItem -Recurse $out -Filter DisplayLabIdd.dll | Select-Object -First 1
-$inf = Get-ChildItem -Recurse $out -Filter DisplayLabIdd.inf |
-    Where-Object { -not (Select-String -Quiet -SimpleMatch '$UMDFVERSION$' $_.FullName) } | Select-Object -First 1
-if (-not $dll -or -not $inf) {
-    Check $false 'the build produced DisplayLabIdd.dll and a stamped DisplayLabIdd.inf'
+if (-not $dll) {
+    Check $false 'the build produced DisplayLabIdd.dll'
     "== Summary"; $failures | ForEach-Object { "FAIL  $_" }; exit 1
 }
-"stamped INF:"
-Get-Content $inf.FullName | Select-String 'DriverVer|UmdfLibraryVersion'
+
+"== Stamp the INF"
+# What stampinf would do: the version, the architecture, the UMDF version
+# the project builds against (UMDF_VERSION_MAJOR/MINOR in the vcxproj).
+$version = "1.0.$((Get-Date).ToString('yyMM')).$((Get-Date).ToString('ddHH'))"
+$stamped = (Get-Content (Join-Path $root 'driver\windows\DisplayLabIdd.inf') -Raw).
+    Replace('DriverVer=', "DriverVer=$((Get-Date).ToString('MM/dd/yyyy')),$version").
+    Replace('$ARCH$', 'amd64').
+    Replace('$UMDFVERSION$', '2.25.0')
+$inf = Join-Path $work 'DisplayLabIdd.inf'
+Set-Content -Path $inf -Value $stamped -Encoding ascii
+Get-Content $inf | Select-String 'DriverVer|UmdfLibraryVersion|NTamd64'
 
 # --- 2. Sign with our own certificate, trust it, install ----------------------
 
 $pkg = Join-Path $work 'package'
 New-Item -ItemType Directory -Force -Path $pkg | Out-Null
-Copy-Item $dll.FullName, $inf.FullName $pkg
+Copy-Item $dll.FullName, $inf $pkg
 
 $signtool = Tool 'signtool.exe' 'x64'
 $inf2cat = Tool 'inf2cat.exe' 'x86'

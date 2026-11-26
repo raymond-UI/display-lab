@@ -14,9 +14,8 @@
   <ItemGroup>
     <ClInclude Include="Driver.h" />
   </ItemGroup>
-  <ItemGroup>
-    <Inf Include="DisplayLabIdd.inf" />
-  </ItemGroup>
+  <!-- DisplayLabIdd.inf is stamped by ci/windows-driver.ps1 (DriverVer,
+       $ARCH$, $UMDFVERSION$) rather than by the build's stampinf. -->
   <PropertyGroup Label="Globals">
     <ProjectGuid>{6E0B7C1A-3D2F-4B8E-9A51-2C7D4E8F1B30}</ProjectGuid>
     <TemplateGuid>{32909489-7be5-497b-aafa-db6669d9b44b}</TemplateGuid>
