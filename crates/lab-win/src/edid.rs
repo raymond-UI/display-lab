@@ -46,8 +46,10 @@ pub fn build(identity: &Identity, mode: &Mode) -> Result<[u8; 128], EdidError> {
     e[19] = 4;
     e[20] = 0xA2; // digital, 8 bits per colour, HDMI-a
 
-    // A large physical size keeps Windows at 100% scaling, so a capture is
-    // pixel for pixel what the profile says.
+    // The physical size of a 96 DPI screen. Windows picks a scale factor
+    // from size and resolution, and scales big screens up as if they were
+    // TVs; at 96 DPI it stays at 100%, so a capture is pixel for pixel what
+    // the profile says.
     let (w_cm, h_cm) = physical_cm(mode);
     e[21] = w_cm;
     e[22] = h_cm;
@@ -138,9 +140,8 @@ fn checksum(e: &[u8]) -> u8 {
 }
 
 fn physical_cm(mode: &Mode) -> (u8, u8) {
-    let w = 200u32; // cm: a projected picture is big
-    let h = (w * mode.height / mode.width.max(1)).clamp(1, 255);
-    (w as u8, h as u8)
+    let cm = |px: u32| ((px as f64 / 96.0 * 2.54).round() as u32).clamp(1, 255) as u8;
+    (cm(mode.width), cm(mode.height))
 }
 
 /// A CVT reduced-blanking timing for `mode`.
@@ -286,6 +287,12 @@ mod tests {
         assert!(build(&id, &mode(1920, 1080, 60.0)).is_err());
         assert!(build(&identity("x"), &mode(7680, 4320, 60.0)).is_err());
         assert!(parse(&[0u8; 128]).is_err());
+    }
+
+    #[test]
+    fn physical_size_is_96_dpi() {
+        let e = build(&identity("x"), &mode(1920, 1080, 60.0)).unwrap();
+        assert_eq!((e[21], e[22]), (51, 29));
     }
 
     #[test]

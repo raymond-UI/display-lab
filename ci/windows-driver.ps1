@@ -161,11 +161,57 @@ function Monitors {
     }
 }
 
-# What is on the desktop: the screens apps can draw on.
+# What is on the desktop now, in real pixels: the screens apps can draw on.
+# (System.Windows.Forms.Screen caches its list for the life of the process,
+# and its bounds are scaled for DPI, so it is no use here.)
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+public static class LabDesktop {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct DISPLAY_DEVICE {
+        public int cb;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceString;
+        public int StateFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceID;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceKey;
+    }
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct DEVMODE {
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmDeviceName;
+        public short dmSpecVersion, dmDriverVersion, dmSize, dmDriverExtra;
+        public int dmFields, dmPositionX, dmPositionY, dmDisplayOrientation, dmDisplayFixedOutput;
+        public short dmColor, dmDuplex, dmYResolution, dmTTOption, dmCollate;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmFormName;
+        public short dmLogPixels;
+        public int dmBitsPerPel, dmPelsWidth, dmPelsHeight, dmDisplayFlags, dmDisplayFrequency;
+        public int dmICMMethod, dmICMIntent, dmMediaType, dmDitherType, dmReserved1, dmReserved2, dmPanningWidth, dmPanningHeight;
+    }
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern bool EnumDisplayDevices(string lpDevice, int iDevNum, ref DISPLAY_DEVICE lpDisplayDevice, int dwFlags);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern bool EnumDisplaySettings(string deviceName, int modeNum, ref DEVMODE devMode);
+    public static List<string> Screens() {
+        var list = new List<string>();
+        for (int i = 0; ; i++) {
+            var d = new DISPLAY_DEVICE(); d.cb = Marshal.SizeOf(d);
+            if (!EnumDisplayDevices(null, i, ref d, 0)) break;
+            if ((d.StateFlags & 1) == 0) continue; // not attached to the desktop
+            var m = new DEVMODE(); m.dmSize = (short)Marshal.SizeOf(m);
+            if (!EnumDisplaySettings(d.DeviceName, -1, ref m)) continue;
+            list.Add(string.Format("{0}|{1},{2}|{3}x{4}|{5}", d.DeviceName, m.dmPositionX, m.dmPositionY, m.dmPelsWidth, m.dmPelsHeight, m.dmDisplayFrequency));
+        }
+        return list;
+    }
+}
+'@
+
 function Desktop {
-    Add-Type -AssemblyName System.Windows.Forms
-    [System.Windows.Forms.Screen]::AllScreens | ForEach-Object {
-        [pscustomobject]@{ Device = $_.DeviceName; Bounds = "$($_.Bounds.X),$($_.Bounds.Y) $($_.Bounds.Width)x$($_.Bounds.Height)"; Primary = $_.Primary }
+    [LabDesktop]::Screens() | ForEach-Object {
+        $f = $_ -split '\|'
+        [pscustomobject]@{ Device = $f[0]; Origin = $f[1]; Size = $f[2]; Hz = $f[3] }
     }
 }
 
@@ -201,13 +247,14 @@ Check (WaitFor { @(Monitors | Where-Object Serial -eq '2001').Count -eq 1 }) 'a 
 Show 'after plugging the projector'
 $p0 = Monitors | Where-Object Serial -eq '2001'
 Check ($p0.Name -eq 'Lab HD Projec' -and $p0.Product -match '^0*500$') "it carries the profile's name and product ($($p0.Name), $($p0.Product))"
+Check (WaitFor { @(Desktop | Where-Object Size -eq '1920x1080').Count -eq 1 }) 'it joins the desktop at its 1920x1080'
+
 
 $stage = Pipe "PLUG 1 $(PlugArgs stage-monitor)"
 "PLUG 1 stage-monitor: $stage"
 Check (WaitFor { @(Monitors | Where-Object Serial -eq '4001').Count -eq 1 }) 'a second screen appears with its own identity (4001)'
 Show 'after plugging the stage monitor'
 $stageBefore = Monitors | Where-Object Serial -eq '4001'
-$desktopBefore = @(Desktop).Count
 
 "UNPLUG 0: $(Pipe 'UNPLUG 0')"
 Check (WaitFor { @(Monitors | Where-Object Serial -eq '2001').Count -eq 0 }) 'unplugging the projector removes it'
@@ -222,14 +269,14 @@ Show 'after plugging the spare'
 "PLUG 2 hd-projector 1280x720: $(Pipe "PLUG 2 $(PlugArgs hd-projector 1280x720)")"
 Start-Sleep -Seconds 3
 Show 'after plugging the projector at 1280x720'
-Check (@(Desktop | Where-Object Bounds -like '* 1280x720').Count -ge 1) 'a screen comes up in the mode asked for (1280x720)'
+Check (@(Desktop | Where-Object Size -eq '1280x720').Count -eq 1) 'a screen comes up in the mode asked for (1280x720)'
 
 "LIST: $(Pipe 'LIST')"
 Check ((Pipe 'PLUG 1 00 1x1@1') -like 'ERR*') 'a bad request is refused, not crashed on'
 Check ((Pipe 'PING') -like 'OK*') 'the driver still answers after a bad request'
 
 foreach ($slot in 0, 1, 2) { "UNPLUG ${slot}: $(Pipe "UNPLUG $slot")" }
-Check (WaitFor { @(Monitors).Count -eq $baseline }) 'unplugging everything leaves the runner as it was'
+Check (WaitFor { @(Monitors).Count -eq $baseline -and @(Desktop).Count -eq 1 }) 'unplugging everything leaves the runner as it was'
 Show 'at the end'
 
 "== Driver package"
