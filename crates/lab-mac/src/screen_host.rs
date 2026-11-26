@@ -46,7 +46,10 @@ mod host {
     use objc2_foundation::{NSArray, NSSize, NSString};
     use std::ffi::CStr;
     use std::io::{Read, Write};
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
+
+    /// How long to keep asking for the display when the window server refuses it.
+    const CREATE_RETRY: Duration = Duration::from_secs(3);
 
     pub enum Never {}
 
@@ -188,10 +191,28 @@ mod host {
             let main_queue: *const AnyObject = &raw const _dispatch_main_q;
             let _: () = msg_send![&*descriptor, setQueue: main_queue];
 
-            let allocated: Allocated<AnyObject> = msg_send![display_cls, alloc];
-            let display: Option<Retained<AnyObject>> =
-                msg_send![allocated, initWithDescriptor: &*descriptor];
-            let display = display.ok_or("the window server refused the virtual display")?;
+            // Removing a display finishes inside the window server a moment
+            // after it leaves the active list, and until then it can refuse
+            // a new display with the same identity. Retry for a bounded time.
+            let deadline = Instant::now() + CREATE_RETRY;
+            let display = loop {
+                let allocated: Allocated<AnyObject> = msg_send![display_cls, alloc];
+                let display: Option<Retained<AnyObject>> =
+                    msg_send![allocated, initWithDescriptor: &*descriptor];
+                match display {
+                    Some(display) => break display,
+                    None if Instant::now() < deadline => {
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
+                    None => {
+                        return Err(format!(
+                            "the window server refused the virtual display \
+                             (still refused after {} s)",
+                            CREATE_RETRY.as_secs()
+                        ))
+                    }
+                }
+            };
 
             let mode_alloc: Allocated<AnyObject> = msg_send![mode_cls, alloc];
             let mode: Option<Retained<AnyObject>> = msg_send![
@@ -223,6 +244,33 @@ mod host {
 
         println!("ready {display_id}");
         std::io::stdout().flush().map_err(|e| e.to_string())?;
+
+        // On a Mac with a built-in panel, macOS may mirror that panel onto a
+        // new display, which takes the panel out of the active list and the
+        // scenario's host screen with it. Lab screens extend the desktop, as
+        // a real projector set to "extend" does, so undo any mirroring for
+        // as long as this screen lives. The change is scoped to this
+        // process, so it is undone when the screen is unplugged.
+        std::thread::spawn(move || {
+            let mut last_error = None;
+            loop {
+                if crate::cg::in_mirror_set(display_id) {
+                    match crate::cg::stop_mirroring(display_id) {
+                        Ok(()) => last_error = None,
+                        Err(e) => {
+                            if last_error.as_ref() != Some(&e) {
+                                eprintln!(
+                                    "displaylab screen host: display {display_id} is mirrored \
+                                     and could not be set to extend: {e}"
+                                );
+                            }
+                            last_error = Some(e);
+                        }
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        });
 
         // Exit when the lab closes our stdin, which it also does by dying.
         std::thread::spawn(|| {

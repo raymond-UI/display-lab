@@ -216,3 +216,74 @@ pub fn parent_pid(pid: i32) -> Option<i32> {
     };
     (got == size).then_some(info.ppid as i32)
 }
+
+#[link(name = "CoreGraphics", kind = "framework")]
+unsafe extern "C" {
+    fn CGGetOnlineDisplayList(max: u32, displays: *mut DisplayId, count: *mut u32) -> i32;
+    fn CGDisplayIsInMirrorSet(display: DisplayId) -> u32;
+    fn CGDisplayMirrorsDisplay(display: DisplayId) -> DisplayId;
+    fn CGBeginDisplayConfiguration(config: *mut *mut c_void) -> i32;
+    fn CGConfigureDisplayMirrorOfDisplay(
+        config: *mut c_void,
+        display: DisplayId,
+        master: DisplayId,
+    ) -> i32;
+    fn CGCompleteDisplayConfiguration(config: *mut c_void, option: u32) -> i32;
+    fn CGCancelDisplayConfiguration(config: *mut c_void) -> i32;
+}
+
+/// `kCGNullDirectDisplay`: mirror nothing.
+const NULL_DISPLAY: DisplayId = 0;
+/// `kCGConfigureForAppOnly`: the change is undone when this process exits.
+const CONFIGURE_FOR_APP_ONLY: u32 = 0;
+
+/// Whether `display` mirrors another display or is mirrored by one.
+pub fn in_mirror_set(display: DisplayId) -> bool {
+    // SAFETY: takes any display id.
+    unsafe { CGDisplayIsInMirrorSet(display) != 0 }
+}
+
+/// Take `display` out of any mirror set, so it extends the desktop: it stops
+/// mirroring anything, and every display that mirrors it stops too. The
+/// change lasts only as long as this process.
+pub fn stop_mirroring(display: DisplayId) -> Result<(), String> {
+    let mut ids = [0u32; 64];
+    let mut count = 0u32;
+    // SAFETY: the buffer holds 64 ids and we pass 64 as its capacity.
+    let err = unsafe { CGGetOnlineDisplayList(ids.len() as u32, ids.as_mut_ptr(), &mut count) };
+    if err != 0 {
+        return Err(format!("listing online displays failed ({err})"));
+    }
+    let online = &ids[..count as usize];
+    // SAFETY: takes any display id.
+    let mirrors = |d: DisplayId| unsafe { CGDisplayMirrorsDisplay(d) };
+    let targets: Vec<DisplayId> = online
+        .iter()
+        .copied()
+        .filter(|&d| (d == display && mirrors(d) != NULL_DISPLAY) || mirrors(d) == display)
+        .collect();
+    if targets.is_empty() {
+        return Ok(());
+    }
+    let mut config: *mut c_void = std::ptr::null_mut();
+    // SAFETY: `config` is written by Begin and only used until Complete or
+    // Cancel, which both release it.
+    unsafe {
+        let err = CGBeginDisplayConfiguration(&mut config);
+        if err != 0 || config.is_null() {
+            return Err(format!("starting a display configuration failed ({err})"));
+        }
+        for d in targets {
+            let err = CGConfigureDisplayMirrorOfDisplay(config, d, NULL_DISPLAY);
+            if err != 0 {
+                CGCancelDisplayConfiguration(config);
+                return Err(format!("unmirroring display {d} failed ({err})"));
+            }
+        }
+        let err = CGCompleteDisplayConfiguration(config, CONFIGURE_FOR_APP_ONLY);
+        if err != 0 {
+            return Err(format!("applying the display configuration failed ({err})"));
+        }
+    }
+    Ok(())
+}

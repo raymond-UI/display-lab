@@ -35,6 +35,11 @@ struct Entry {
 struct Registry {
     next: u64,
     entries: Vec<Entry>,
+    /// Capture streams, by screen. Kept here rather than in the capture
+    /// half so unplugging a screen stops its stream first: a stream left
+    /// running on a removed display can make the window server refuse the
+    /// next display with the same identity.
+    streams: HashMap<ScreenId, Stream>,
 }
 
 type Shared = Arc<Mutex<Registry>>;
@@ -56,10 +61,7 @@ pub fn backend() -> Result<Backend, BackendError> {
             registry: registry.clone(),
             host_exe,
         }),
-        Box::new(MacCapture {
-            registry,
-            streams: HashMap::new(),
-        }),
+        Box::new(MacCapture { registry }),
     ))
 }
 
@@ -224,6 +226,9 @@ impl Displays for MacDisplays {
             ));
         }
         let mut entry = r.entries.remove(i);
+        if let Some(old) = r.streams.remove(&id) {
+            let _ = old.stream.stop_capture();
+        }
         if let Some(mut child) = entry.child.take() {
             // The window server removes the screen when the process exits.
             let _ = child.kill();
@@ -360,7 +365,6 @@ struct Stream {
 
 struct MacCapture {
     registry: Shared,
-    streams: HashMap<ScreenId, Stream>,
 }
 
 impl MacCapture {
@@ -415,40 +419,52 @@ impl MacCapture {
 
 impl Capture for MacCapture {
     fn frame(&mut self, id: ScreenId) -> Result<Option<Frame>, BackendError> {
-        let cg_id = {
+        let (cg_id, has_stream) = {
             let r = lock(&self.registry);
-            r.entries.iter().find(|e| e.lab == id).and_then(|e| e.cg)
+            let cg_id = r.entries.iter().find(|e| e.lab == id).and_then(|e| e.cg);
+            let has_stream = r.streams.get(&id).is_some_and(|s| Some(s.cg) == cg_id);
+            (cg_id, has_stream)
         };
         let active = cg::active_displays();
         let Some(cg_id) = cg_id.filter(|c| active.contains(c)) else {
             // Gone, or not reported yet. Drop any stream on it.
-            if let Some(old) = self.streams.remove(&id) {
+            if let Some(old) = lock(&self.registry).streams.remove(&id) {
                 let _ = old.stream.stop_capture();
             }
             return Err(BackendError::NoSuchScreen(id));
         };
-        if self.streams.get(&id).is_none_or(|s| s.cg != cg_id) {
-            match self.start(cg_id)? {
-                Some(stream) => {
-                    self.streams.insert(id, stream);
-                }
-                None => return Ok(None),
+        if !has_stream {
+            // Started without the lock held: listing shareable content can
+            // take a moment, and the screen hosts' readers need the lock.
+            let Some(stream) = self.start(cg_id)? else {
+                return Ok(None);
+            };
+            let mut r = lock(&self.registry);
+            if !r.entries.iter().any(|e| e.lab == id) {
+                // Unplugged while the stream was starting.
+                let _ = stream.stream.stop_capture();
+                return Err(BackendError::NoSuchScreen(id));
+            }
+            if let Some(old) = r.streams.insert(id, stream) {
+                let _ = old.stream.stop_capture();
             }
         }
-        let Some(stream) = self.streams.get(&id) else {
+        let r = lock(&self.registry);
+        let Some(stream) = r.streams.get(&id) else {
             return Ok(None);
         };
-        Ok(stream
+        let frame = stream
             .latest
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .clone())
+            .clone();
+        Ok(frame)
     }
 }
 
 impl Drop for MacCapture {
     fn drop(&mut self) {
-        for (_, s) in self.streams.drain() {
+        for (_, s) in lock(&self.registry).streams.drain() {
             let _ = s.stream.stop_capture();
         }
     }

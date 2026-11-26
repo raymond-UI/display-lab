@@ -3,3 +3,4 @@ out/
 *.png
 !docs/*.png
 driver/windows/packages/
+.DS_Store
