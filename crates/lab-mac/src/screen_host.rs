@@ -251,11 +251,24 @@ mod host {
         // a real projector set to "extend" does, so undo any mirroring for
         // as long as this screen lives. The change is scoped to this
         // process, so it is undone when the screen is unplugged.
+        let debug = std::env::var_os("DISPLAYLAB_DEBUG").is_some();
         std::thread::spawn(move || {
             let mut last_error = None;
+            let mut last_seen = String::new();
             loop {
+                if debug {
+                    let seen = crate::cg::describe_displays();
+                    if seen != last_seen {
+                        eprintln!("[screen-host {display_id}] displays: {seen}");
+                        last_seen = seen;
+                    }
+                }
                 if crate::cg::in_mirror_set(display_id) {
-                    match crate::cg::stop_mirroring(display_id) {
+                    let result = crate::cg::stop_mirroring(display_id);
+                    if debug {
+                        eprintln!("[screen-host {display_id}] mirrored; set to extend: {result:?}");
+                    }
+                    match result {
                         Ok(()) => last_error = None,
                         Err(e) => {
                             if last_error.as_ref() != Some(&e) {

@@ -252,7 +252,10 @@ impl Displays for MacDisplays {
                     e.failed
                 );
             }
-            eprintln!("[lab-mac] active displays: {active:?}");
+            eprintln!(
+                "[lab-mac] active displays: {active:?}; online: {}",
+                cg::describe_displays()
+            );
         }
         Ok(r.entries
             .iter()

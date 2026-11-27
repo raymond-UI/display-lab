@@ -287,3 +287,37 @@ pub fn stop_mirroring(display: DisplayId) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Every online display with its active and mirror state, for debug logs.
+pub fn describe_displays() -> String {
+    let mut ids = [0u32; 64];
+    let mut count = 0u32;
+    // SAFETY: the buffer holds 64 ids and we pass 64 as its capacity.
+    let err = unsafe { CGGetOnlineDisplayList(ids.len() as u32, ids.as_mut_ptr(), &mut count) };
+    if err != 0 {
+        return format!("(listing online displays failed: {err})");
+    }
+    ids[..count as usize]
+        .iter()
+        .map(|&d| {
+            // SAFETY: each takes any display id.
+            let (active, mirrored, mirrors) = unsafe {
+                (
+                    CGDisplayIsActive(d) != 0,
+                    CGDisplayIsInMirrorSet(d) != 0,
+                    CGDisplayMirrorsDisplay(d),
+                )
+            };
+            let mut s = format!("{d}");
+            s.push_str(if active { " active" } else { " inactive" });
+            if mirrored {
+                s.push_str(" in-mirror-set");
+            }
+            if mirrors != NULL_DISPLAY {
+                s.push_str(&format!(" mirrors {mirrors}"));
+            }
+            s
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
