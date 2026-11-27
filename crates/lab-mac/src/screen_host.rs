@@ -139,6 +139,9 @@ mod host {
         if a.delay_ms > 0 {
             std::thread::sleep(Duration::from_millis(a.delay_ms));
         }
+        // The main display before this screen exists, to give the role back
+        // if macOS hands it to the new screen.
+        let main_before = crate::cg::main_display();
 
         let descriptor_cls = class(
             c"CGVirtualDisplayDescriptor",
@@ -249,11 +252,15 @@ mod host {
         // new display, which takes the panel out of the active list and the
         // scenario's host screen with it. Lab screens extend the desktop, as
         // a real projector set to "extend" does, so undo any mirroring for
-        // as long as this screen lives. The change is scoped to this
-        // process, so it is undone when the screen is unplugged.
+        // as long as this screen lives. macOS may also make the new display
+        // the main one, which moves the menu bar and the person's windows
+        // onto it; give the role back to the display that had it. Both
+        // changes are scoped to this process, so they are undone when the
+        // screen is unplugged.
         let debug = std::env::var_os("DISPLAYLAB_DEBUG").is_some();
         std::thread::spawn(move || {
             let mut last_error = None;
+            let mut last_main_error = None;
             let mut last_seen = String::new();
             loop {
                 if debug {
@@ -278,6 +285,30 @@ mod host {
                                 );
                             }
                             last_error = Some(e);
+                        }
+                    }
+                }
+                if main_before != display_id
+                    && crate::cg::main_display() == display_id
+                    && crate::cg::active_displays().contains(&main_before)
+                {
+                    let result = crate::cg::make_main(main_before);
+                    if debug {
+                        eprintln!(
+                            "[screen-host {display_id}] became main; gave it back to \
+                             {main_before}: {result:?}"
+                        );
+                    }
+                    match result {
+                        Ok(()) => last_main_error = None,
+                        Err(e) => {
+                            if last_main_error.as_ref() != Some(&e) {
+                                eprintln!(
+                                    "displaylab screen host: display {display_id} became the \
+                                     main display and could not give the role back: {e}"
+                                );
+                            }
+                            last_main_error = Some(e);
                         }
                     }
                 }

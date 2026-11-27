@@ -228,6 +228,7 @@ unsafe extern "C" {
         display: DisplayId,
         master: DisplayId,
     ) -> i32;
+    fn CGConfigureDisplayOrigin(config: *mut c_void, display: DisplayId, x: i32, y: i32) -> i32;
     fn CGCompleteDisplayConfiguration(config: *mut c_void, option: u32) -> i32;
     fn CGCancelDisplayConfiguration(config: *mut c_void) -> i32;
 }
@@ -279,6 +280,34 @@ pub fn stop_mirroring(display: DisplayId) -> Result<(), String> {
                 CGCancelDisplayConfiguration(config);
                 return Err(format!("unmirroring display {d} failed ({err})"));
             }
+        }
+        let err = CGCompleteDisplayConfiguration(config, CONFIGURE_FOR_APP_ONLY);
+        if err != 0 {
+            return Err(format!("applying the display configuration failed ({err})"));
+        }
+    }
+    Ok(())
+}
+
+/// Make `display` the main display, the one with the menu bar and the
+/// desktop's windows: the main display is the one at the origin. The window
+/// server moves the others out of its way. The change lasts only as long as
+/// this process.
+pub fn make_main(display: DisplayId) -> Result<(), String> {
+    let mut config: *mut c_void = std::ptr::null_mut();
+    // SAFETY: `config` is written by Begin and only used until Complete or
+    // Cancel, which both release it.
+    unsafe {
+        let err = CGBeginDisplayConfiguration(&mut config);
+        if err != 0 || config.is_null() {
+            return Err(format!("starting a display configuration failed ({err})"));
+        }
+        let err = CGConfigureDisplayOrigin(config, display, 0, 0);
+        if err != 0 {
+            CGCancelDisplayConfiguration(config);
+            return Err(format!(
+                "moving display {display} to the origin failed ({err})"
+            ));
         }
         let err = CGCompleteDisplayConfiguration(config, CONFIGURE_FOR_APP_ONLY);
         if err != 0 {
