@@ -2,8 +2,8 @@
 
 use crate::{cg, permission};
 use lab_core::{
-    now_ns, Backend, BackendError, Capture, Displays, Frame, Identity, Mode, Profile, ScreenId,
-    ScreenInfo,
+    now_ns, Backend, BackendError, Capture, Displays, Frame, FrameTest, Identity, Mode, Profile,
+    ScreenId, ScreenInfo, WatchId,
 };
 use screencapturekit::cv::CVPixelBufferLockFlags;
 use screencapturekit::prelude::*;
@@ -17,6 +17,10 @@ use std::time::{Duration, Instant};
 /// How long a host process may take to say `ready`, beyond any delay the
 /// profile asked for.
 const HOST_START: Duration = Duration::from_secs(10);
+
+/// How long an app may take to show up in ScreenCaptureKit's list after the
+/// lab asks to capture only its windows (a just-launched app lags).
+const APP_APPEARS: Duration = Duration::from_secs(10);
 
 struct Entry {
     lab: ScreenId,
@@ -40,6 +44,26 @@ struct Registry {
     /// running on a removed display can make the window server refuse the
     /// next display with the same identity.
     streams: HashMap<ScreenId, Stream>,
+    /// Capture only this app's windows, by bundle id; `None` captures the
+    /// whole screen.
+    app: Option<String>,
+    /// Per screen, the frame tests the stream runs on every new frame.
+    /// They outlive a stream, so rebuilding one keeps its watches.
+    watches: HashMap<ScreenId, Watches>,
+    next_watch: u64,
+}
+
+struct Watch {
+    id: WatchId,
+    test: FrameTest,
+    /// The first frame that passed `test`.
+    caught: Option<Frame>,
+}
+
+type Watches = Arc<Mutex<Vec<Watch>>>;
+
+fn lock_watches(w: &Watches) -> MutexGuard<'_, Vec<Watch>> {
+    w.lock().unwrap_or_else(|p| p.into_inner())
 }
 
 type Shared = Arc<Mutex<Registry>>;
@@ -226,6 +250,7 @@ impl Displays for MacDisplays {
             ));
         }
         let mut entry = r.entries.remove(i);
+        r.watches.remove(&id);
         if let Some(old) = r.streams.remove(&id) {
             let _ = old.stream.stop_capture();
         }
@@ -291,6 +316,8 @@ impl Displays for MacDisplays {
             }
         }
         r.entries.clear();
+        r.watches.clear();
+        r.app = None;
         Ok(())
     }
 }
@@ -301,9 +328,11 @@ impl Drop for MacDisplays {
     }
 }
 
-/// The newest complete frame from one ScreenCaptureKit stream.
+/// The newest complete frame from one ScreenCaptureKit stream, and the
+/// first frame each watch on the screen was waiting for.
 struct Sink {
     latest: Arc<Mutex<Option<Frame>>>,
+    watches: Watches,
 }
 
 impl SCStreamOutputTrait for Sink {
@@ -356,6 +385,13 @@ impl SCStreamOutputTrait for Sink {
             rgba,
             present_ns,
         };
+        // Watches first: a reader that sees the new frame as the latest
+        // must also find it caught.
+        for w in lock_watches(&self.watches).iter_mut() {
+            if w.caught.is_none() && (w.test)(&frame) {
+                w.caught = Some(frame.clone());
+            }
+        }
         *self.latest.lock().unwrap_or_else(|p| p.into_inner()) = Some(frame);
     }
 }
@@ -374,7 +410,12 @@ impl MacCapture {
     /// A running stream on `cg_id`, or `None` if ScreenCaptureKit does not
     /// list the screen yet (it lags the window server by a moment after a
     /// plug).
-    fn start(&self, cg_id: cg::DisplayId) -> Result<Option<Stream>, BackendError> {
+    fn start(
+        &self,
+        cg_id: cg::DisplayId,
+        app: Option<&str>,
+        watches: Watches,
+    ) -> Result<Option<Stream>, BackendError> {
         let platform = |what: &str, e: SCError| BackendError::Platform(format!("{what}: {e}"));
         let facts = cg::facts(cg_id).ok_or(BackendError::Platform("screen has no mode".into()))?;
         // Shareable content is a snapshot; take a fresh one so a screen that
@@ -388,11 +429,24 @@ impl MacCapture {
         else {
             return Ok(None);
         };
-        let filter = SCContentFilter::create()
-            .with_display(&display)
-            .with_excluding_windows(&[])
-            .build()
-            .map_err(|e| platform("building the capture filter", e))?;
+        let filter = SCContentFilter::create().with_display(&display);
+        let filter = match app {
+            None => filter.with_excluding_windows(&[]),
+            Some(bundle_id) => {
+                let Some(app) = content
+                    .applications()
+                    .into_iter()
+                    .find(|a| a.bundle_identifier() == bundle_id)
+                else {
+                    return Err(BackendError::Platform(format!(
+                        "{bundle_id} is not running, so there are no windows of it to capture"
+                    )));
+                };
+                filter.with_including_applications(&[&app], &[])
+            }
+        }
+        .build()
+        .map_err(|e| platform("building the capture filter", e))?;
         let config = SCStreamConfiguration::new()
             .with_width(facts.width)
             .with_height(facts.height)
@@ -405,6 +459,7 @@ impl MacCapture {
             .add_output_handler(
                 Sink {
                     latest: latest.clone(),
+                    watches,
                 },
                 SCStreamOutputType::Screen,
             )
@@ -420,13 +475,85 @@ impl MacCapture {
     }
 }
 
+/// Whether ScreenCaptureKit lists a running app with this bundle id.
+fn app_listed(bundle_id: &str) -> Result<bool, BackendError> {
+    let content = SCShareableContent::get().map_err(|e| {
+        BackendError::Platform(format!("listing apps (Screen Recording permission?): {e}"))
+    })?;
+    Ok(content
+        .applications()
+        .iter()
+        .any(|a| a.bundle_identifier() == bundle_id))
+}
+
 impl Capture for MacCapture {
+    fn only_app(&mut self, bundle_id: &str) -> Result<(), BackendError> {
+        // Wait for the app here, where a missing app is one clear error,
+        // rather than in every frame afterwards.
+        let deadline = Instant::now() + APP_APPEARS;
+        while !app_listed(bundle_id)? {
+            if Instant::now() >= deadline {
+                return Err(BackendError::Platform(format!(
+                    "{bundle_id} is not running (not listed by ScreenCaptureKit after {} s)",
+                    APP_APPEARS.as_secs()
+                )));
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        let mut r = lock(&self.registry);
+        r.app = Some(bundle_id.to_string());
+        // Rebuild every stream on next use: the filter names the app's
+        // process, which may be a new one since the last call.
+        for (_, s) in r.streams.drain() {
+            let _ = s.stream.stop_capture();
+        }
+        Ok(())
+    }
+
+    fn watch(&mut self, id: ScreenId, test: FrameTest) -> Result<Option<WatchId>, BackendError> {
+        let mut r = lock(&self.registry);
+        if !r.entries.iter().any(|e| e.lab == id) {
+            return Err(BackendError::NoSuchScreen(id));
+        }
+        r.next_watch += 1;
+        let watch = WatchId(r.next_watch);
+        lock_watches(r.watches.entry(id).or_default()).push(Watch {
+            id: watch,
+            test,
+            caught: None,
+        });
+        Ok(Some(watch))
+    }
+
+    fn caught(&mut self, watch: WatchId) -> Result<Option<Frame>, BackendError> {
+        let r = lock(&self.registry);
+        for list in r.watches.values() {
+            if let Some(w) = lock_watches(list).iter().find(|w| w.id == watch) {
+                return Ok(w.caught.clone());
+            }
+        }
+        Ok(None)
+    }
+
+    fn unwatch(&mut self, watch: WatchId) {
+        let r = lock(&self.registry);
+        for list in r.watches.values() {
+            lock_watches(list).retain(|w| w.id != watch);
+        }
+    }
+
     fn frame(&mut self, id: ScreenId) -> Result<Option<Frame>, BackendError> {
-        let (cg_id, has_stream) = {
-            let r = lock(&self.registry);
+        let (cg_id, has_stream, app, watches) = {
+            let mut r = lock(&self.registry);
             let cg_id = r.entries.iter().find(|e| e.lab == id).and_then(|e| e.cg);
             let has_stream = r.streams.get(&id).is_some_and(|s| Some(s.cg) == cg_id);
-            (cg_id, has_stream)
+            let app = r.app.clone();
+            // Only a screen the lab knows gets a watch list.
+            let watches = match cg_id {
+                Some(_) => r.watches.entry(id).or_default().clone(),
+                None => Watches::default(),
+            };
+            (cg_id, has_stream, app, watches)
         };
         let active = cg::active_displays();
         let Some(cg_id) = cg_id.filter(|c| active.contains(c)) else {
@@ -439,7 +566,7 @@ impl Capture for MacCapture {
         if !has_stream {
             // Started without the lock held: listing shareable content can
             // take a moment, and the screen hosts' readers need the lock.
-            let Some(stream) = self.start(cg_id)? else {
+            let Some(stream) = self.start(cg_id, app.as_deref(), watches)? else {
                 return Ok(None);
             };
             let mut r = lock(&self.registry);

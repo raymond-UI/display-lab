@@ -15,7 +15,7 @@ use lab_adapter::{Adapter, AdapterError, ScreenRef};
 use lab_compare::{compare, diff_image, differs, is_blank, load_png, save_png, Thresholds};
 use lab_core::{
     now_ns, BackendError, Capture, CompareSpec, Displays, Frame, Mode, Profile, ProfileSet,
-    Scenario, ScreenId, ScreenInfo, Step,
+    Scenario, ScreenId, ScreenInfo, Step, WatchId,
 };
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -102,6 +102,7 @@ impl<'a> Runner<'a> {
             backend: self.backend.clone(),
             passed: false,
             error: None,
+            notes: vec![],
             steps: vec![],
             latencies: vec![],
             duration_ms: 0,
@@ -118,6 +119,15 @@ impl<'a> Runner<'a> {
                 return report;
             }
         };
+        match self.capture_app() {
+            Ok(Some(note)) => report.notes.push(note),
+            Ok(None) => {}
+            Err(e) => {
+                report.error = Some(e);
+                report.duration_ms = started.elapsed().as_millis() as u64;
+                return report;
+            }
+        }
 
         let mut run = Run {
             runner: self,
@@ -164,6 +174,15 @@ impl<'a> Runner<'a> {
         }
 
         // Always tidy up, pass or fail, so the next run starts clean.
+        let watches: Vec<WatchId> = run
+            .marks
+            .values()
+            .chain(run.last_input.as_ref())
+            .flat_map(|m| m.watches.values().copied())
+            .collect();
+        for w in watches {
+            run.runner.capture.unwatch(w);
+        }
         let mut teardown = vec![];
         if run.launched {
             if let Err(e) = run.runner.adapter.stop() {
@@ -185,6 +204,26 @@ impl<'a> Runner<'a> {
             report.error.is_none() && report.steps.iter().all(|s| s.outcome != Outcome::Fail);
         report.duration_ms = started.elapsed().as_millis() as u64;
         report
+    }
+
+    /// Point capture at the app's own windows, when the app names itself.
+    /// Returns a note for the report saying how the screens were seen.
+    fn capture_app(&mut self) -> Result<Option<String>, String> {
+        let Some(bundle_id) = self.adapter.info().bundle_id.clone() else {
+            return Ok(None);
+        };
+        match self.capture.only_app(&bundle_id) {
+            Ok(()) => Ok(Some(format!(
+                "Captured only the windows of `{bundle_id}`: the desktop, other apps \
+                 and the OS's own marks are left out."
+            ))),
+            Err(BackendError::Unsupported(_)) => Ok(Some(format!(
+                "The `{}` backend captures whole screens, so the desktop and other apps \
+                 count as the app's picture (`{bundle_id}` is not used).",
+                self.backend
+            ))),
+            Err(e) => Err(format!("capturing only {bundle_id:?}: {e}")),
+        }
     }
 
     fn preflight(&self, scenario: &Scenario) -> Result<BTreeMap<String, Resolved>, String> {
@@ -262,6 +301,9 @@ struct Run<'r, 'a> {
 struct Mark {
     at_ns: u64,
     before: BTreeMap<String, Option<Frame>>,
+    /// Per screen, the backend's watch for the first frame that differs
+    /// from `before`, where the backend can keep one.
+    watches: BTreeMap<String, WatchId>,
 }
 
 impl Run<'_, '_> {
@@ -380,6 +422,8 @@ impl Run<'_, '_> {
         let screens = self.runner.displays.screens().map_err(|e| e.to_string())?;
         self.runner.adapter.launch(&screens).map_err(app)?;
         self.launched = true;
+        // A started app is a new process: capture has to find it again.
+        self.runner.capture_app()?;
         Ok(StepResult::done())
     }
 
@@ -393,18 +437,58 @@ impl Run<'_, '_> {
         // the screen between the snapshot and the timestamp.
         let names: Vec<String> = self.plugged.keys().cloned().collect();
         let mut before = BTreeMap::new();
+        let mut watches = BTreeMap::new();
         for name in names {
             let frame = self.frame(&name)?;
+            // Ask the backend to keep the first frame that differs, so a
+            // change that is over before the input call returns (a fade
+            // that runs while the app answers) is timed from its start.
+            if let (Some(b), Some(&id)) = (frame.clone(), self.plugged.get(&name)) {
+                match self
+                    .runner
+                    .capture
+                    .watch(id, Box::new(move |f: &Frame| differs(&b, f)))
+                {
+                    Ok(Some(w)) => {
+                        watches.insert(name.clone(), w);
+                    }
+                    Ok(None) | Err(BackendError::NoSuchScreen(_)) => {}
+                    Err(e) => return Err(format!("watching {name:?}: {e}")),
+                }
+            }
             before.insert(name, frame);
         }
         let at_ns = now_ns();
-        self.runner.adapter.input(action, args).map_err(app)?;
-        let m = Mark { at_ns, before };
-        if let Some(name) = mark {
-            self.marks.insert(name.to_string(), m.clone());
+        let m = Mark {
+            at_ns,
+            before,
+            watches,
+        };
+        let sent = self.runner.adapter.input(action, args).map_err(app);
+        let replaced = match mark {
+            Some(name) => self.marks.insert(name.to_string(), m.clone()),
+            None => None,
+        };
+        let previous = self.last_input.replace(m);
+        for old in [replaced, previous].into_iter().flatten() {
+            self.retire(old);
         }
-        self.last_input = Some(m);
+        sent?;
         Ok(StepResult::done())
+    }
+
+    /// Stop the watches of a mark nothing refers to any more.
+    fn retire(&mut self, old: Mark) {
+        for w in old.watches.values() {
+            let in_use = self
+                .marks
+                .values()
+                .chain(self.last_input.as_ref())
+                .any(|m| m.watches.values().any(|x| x == w));
+            if !in_use {
+                self.runner.capture.unwatch(*w);
+            }
+        }
     }
 
     fn plug(&mut self, screen: &str, mode: Option<&str>) -> Result<StepResult, String> {
@@ -547,12 +631,36 @@ impl Run<'_, '_> {
         }
         .ok_or("no input has been sent yet")?;
         let before = mark.before.get(screen).cloned().flatten();
+        let watch = mark.watches.get(screen).copied();
         let mut last = None;
         let verdict = self.poll(within, |run| {
+            // The first changed frame, if the backend kept it: it is earlier
+            // than the newest whenever the picture went on changing.
+            if let Some(w) = watch {
+                let caught = run
+                    .runner
+                    .capture
+                    .caught(w)
+                    .map_err(|e| format!("capturing {screen:?}: {e}"))?;
+                if let Some(frame) = caught {
+                    last = Some(frame.clone());
+                    return Ok(Probe::Done(frame));
+                }
+            }
             let Some(frame) = run.frame(screen)? else {
                 return Ok(Probe::NotYet("nothing on the screen".into()));
             };
             let changed = before.as_ref().is_none_or(|b| differs(b, &frame));
+            if changed {
+                // The backend tests a frame before publishing it, so a
+                // watch may hold an earlier change than this one.
+                if let Some(w) = watch {
+                    if let Ok(Some(first)) = run.runner.capture.caught(w) {
+                        last = Some(first.clone());
+                        return Ok(Probe::Done(first));
+                    }
+                }
+            }
             last = Some(frame.clone());
             Ok(if changed {
                 Probe::Done(frame)

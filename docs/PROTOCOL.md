@@ -20,6 +20,7 @@ Answer:
 {
   "name": "my-app",
   "version": "2.3.0",
+  "bundle_id": "com.example.myapp",
   "protocol": "1.0",
   "capabilities": {
     "setup": false,
@@ -30,6 +31,8 @@ Answer:
   }
 }
 ```
+
+`bundle_id` is optional. On macOS it makes the lab capture only that app's windows, so the desktop and other apps never count as the app's picture. Backends that capture whole screens ignore it and say so in the report.
 
 The major version must match the lab's. Every capability defaults to `false`. The lab refuses a scenario step that needs a capability the adapter lacks before it touches any screen.
 

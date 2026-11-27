@@ -49,6 +49,9 @@ pub struct AppSection {
     /// Shown in reports.
     #[serde(default)]
     pub name: Option<String>,
+    /// The app's macOS bundle id: the lab then captures only its windows.
+    #[serde(default)]
+    pub bundle_id: Option<String>,
     /// The command that starts the app. Without it, the app must already be
     /// running (or be the stdio server itself).
     #[serde(default)]
@@ -76,6 +79,7 @@ impl Default for AppSection {
     fn default() -> AppSection {
         AppSection {
             name: None,
+            bundle_id: None,
             launch: vec![],
             ready: None,
             ready_timeout_s: default_ready_timeout(),
@@ -296,6 +300,14 @@ next = { tool = "next" }
         assert_eq!(c.server.timeout_s, 60);
         assert_eq!(c.app.ready_timeout_s, 30);
         assert_eq!(c.actions["next"].args, serde_json::json!({}));
+    }
+
+    #[test]
+    fn the_app_can_name_its_bundle_id() {
+        assert_eq!(Config::from_toml(MINIMAL, "t").unwrap().app.bundle_id, None);
+        let text = format!("{MINIMAL}\n[app]\nbundle_id = \"org.example.app\"");
+        let c = Config::from_toml(&text, "t").unwrap();
+        assert_eq!(c.app.bundle_id.as_deref(), Some("org.example.app"));
     }
 
     #[test]

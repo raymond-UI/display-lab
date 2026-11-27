@@ -43,6 +43,7 @@ impl McpAdapter {
         let info = AppInfo {
             name: config.app.name.clone().unwrap_or_else(|| "mcp app".into()),
             version: String::new(),
+            bundle_id: config.app.bundle_id.clone(),
             protocol: ADAPTER_PROTOCOL.into(),
             capabilities: Capabilities {
                 setup: config.setup.is_some(),

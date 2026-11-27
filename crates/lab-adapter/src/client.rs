@@ -68,6 +68,7 @@ impl RpcAdapter {
             info: AppInfo {
                 name: String::new(),
                 version: String::new(),
+                bundle_id: None,
                 protocol: PROTOCOL_VERSION.into(),
                 capabilities: Default::default(),
             },

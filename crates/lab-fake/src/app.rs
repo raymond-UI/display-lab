@@ -165,6 +165,7 @@ impl FakeApp {
             info: AppInfo {
                 name: "fake-presenter".into(),
                 version: env!("CARGO_PKG_VERSION").into(),
+                bundle_id: None,
                 protocol: "1.0".into(),
                 capabilities: Capabilities {
                     setup: true,

@@ -50,13 +50,16 @@ pub fn differs(a: &Frame, b: &Frame) -> bool {
     if a.width != b.width || a.height != b.height {
         return true;
     }
-    let changed = a
-        .rgba
+    // Stops counting once enough have changed: this runs on every captured
+    // frame while the lab watches for a change.
+    let min = min_mark_pixels(a);
+    a.rgba
         .chunks_exact(4)
         .zip(b.rgba.chunks_exact(4))
         .filter(|(p, q)| (0..3).any(|c| p[c].abs_diff(q[c]) > CHANGE_TOLERANCE))
-        .count();
-    changed >= min_mark_pixels(a)
+        .take(min)
+        .count()
+        >= min
 }
 
 #[cfg(test)]

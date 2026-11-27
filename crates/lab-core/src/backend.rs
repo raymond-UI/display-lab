@@ -56,11 +56,49 @@ pub trait Displays: Send {
     fn reset(&mut self) -> Result<(), BackendError>;
 }
 
+/// A test a watch puts each new frame to. See [`Capture::watch`].
+pub type FrameTest = Box<dyn Fn(&Frame) -> bool + Send>;
+
+/// One watch on one screen, issued by [`Capture::watch`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct WatchId(pub u64);
+
 /// Seeing what is on a screen.
 pub trait Capture: Send {
     /// The newest frame presented on `id`, or `None` if nothing has been
     /// presented on it yet.
     fn frame(&mut self, id: ScreenId) -> Result<Option<Frame>, BackendError>;
+
+    /// Capture only what the app with this bundle id draws, leaving out the
+    /// desktop, other apps and the OS's own marks, so a screen the app does
+    /// not draw on reads as black. Called again after the app is
+    /// (re)started. A backend that can only capture whole screens says
+    /// [`BackendError::Unsupported`].
+    fn only_app(&mut self, bundle_id: &str) -> Result<(), BackendError> {
+        let _ = bundle_id;
+        Err(BackendError::Unsupported("capture one app's windows"))
+    }
+
+    /// Keep the first frame presented on `id` from now on that passes
+    /// `test`, so a change that is soon replaced (the start of a fade) is
+    /// still seen, with its own presentation time. A backend that only
+    /// keeps the newest frame returns `None`, and the lab looks at that
+    /// instead.
+    fn watch(&mut self, id: ScreenId, test: FrameTest) -> Result<Option<WatchId>, BackendError> {
+        let _ = (id, test);
+        Ok(None)
+    }
+
+    /// The frame a watch caught, once it has caught one.
+    fn caught(&mut self, watch: WatchId) -> Result<Option<Frame>, BackendError> {
+        let _ = watch;
+        Ok(None)
+    }
+
+    /// Stop a watch. Unknown ids are ignored.
+    fn unwatch(&mut self, watch: WatchId) {
+        let _ = watch;
+    }
 }
 
 /// A platform backend: its display half and its capture half. They usually

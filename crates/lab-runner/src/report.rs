@@ -53,6 +53,10 @@ pub struct Report {
     /// the app lacks, a backend that would not plug a screen.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Facts about how the run looked at the screens, for whoever reads the
+    /// verdict: for example, that it captured only the app's windows.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
     pub steps: Vec<StepReport>,
     pub latencies: Vec<Latency>,
     pub duration_ms: u64,
@@ -68,6 +72,9 @@ impl Report {
             "App `{}` on the `{}` backend, {} ms.\n",
             self.app, self.backend, self.duration_ms
         );
+        for note in &self.notes {
+            let _ = writeln!(out, "{note}\n");
+        }
         if let Some(error) = &self.error {
             let _ = writeln!(out, "**Error:** {error}\n");
         }

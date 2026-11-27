@@ -468,6 +468,7 @@ impl NoApp {
             info: AppInfo {
                 name: "no app".into(),
                 version: String::new(),
+                bundle_id: None,
                 protocol: "1.0".into(),
                 capabilities: Capabilities::default(),
             },

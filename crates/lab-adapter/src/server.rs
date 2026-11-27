@@ -234,6 +234,7 @@ mod tests {
             info: AppInfo {
                 name: "counter".into(),
                 version: "0".into(),
+                bundle_id: None,
                 protocol: PROTOCOL_VERSION.into(),
                 capabilities: caps,
             },

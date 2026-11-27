@@ -115,6 +115,8 @@ cargo build --release -p displaylab   # target/release/displaylab
 - Keep profiles to a small fixed set of identities. macOS keeps a colour profile for every display identity it has ever seen.
 - A mode change is an unplug and a plug in the new mode. Changing a virtual display's mode in place makes it impossible to remove until its process exits.
 - Virtual displays must be at least 720x720.
+- Name your app's bundle id (`bundle_id` in an MCP config, or in the adapter's `initialize` answer) and the lab captures only its windows. Without it, the lab captures whole screens, and the wallpaper or another app's window counts as your app's picture.
+- macOS may make a newly plugged screen the main display, which moves your windows onto it. The lab gives the main role straight back to the screen that had it. macOS undoes the change when the lab's screens are removed.
 - `CGVirtualDisplay` is a private CoreGraphics API, the same one every virtual-display app on macOS uses. Apple can change it in any release; the screen host checks every class and selector before calling it and fails with a clear message if one is missing.
 
 ## License

@@ -42,6 +42,7 @@ Raise `timeout_s` if your app asks a person to approve changes. The call waits f
 ```toml
 [app]
 name = "My App"                          # for reports; defaults to the server's name
+bundle_id = "com.example.myapp"          # macOS: capture only this app's windows
 launch = ["/Applications/My App.app/Contents/MacOS/My App"]
 ready = { tool = "get_version" }         # called until it succeeds
 ready_timeout_s = 30
@@ -50,6 +51,8 @@ stop = { tool = "quit" }
 ```
 
 Without `launch`, the app must already be running (or be the stdio server). The lab connects, retrying while nothing is listening, then calls `ready` until it succeeds. A launched app is killed when the scenario ends. Relative paths are relative to where you run `displaylab`.
+
+Set `bundle_id` on macOS. The lab then captures only your app's windows, so the desktop, other apps and the system's own marks never count as your app's picture. Without it, a screen showing the wallpaper passes `expect_content`. The report says which way the screens were captured.
 
 ### Calls and argument templates
 

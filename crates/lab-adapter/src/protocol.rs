@@ -30,6 +30,11 @@ pub struct AppInfo {
     pub name: String,
     #[serde(default)]
     pub version: String,
+    /// The app's macOS bundle id. When set, the macOS backend captures only
+    /// this app's windows, so the desktop, other apps and the OS's own marks
+    /// never count as the app's picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_id: Option<String>,
     pub protocol: String,
     #[serde(default)]
     pub capabilities: Capabilities,

@@ -60,4 +60,4 @@ Every expectation polls until it holds or `within_ms` runs out (default 3000).
 
 ## Latency
 
-`expect_changed` measures from the moment the input was sent to the presentation time of the first changed frame, both on the lab's one monotonic clock. On a virtual screen that is up to the compositor, not the glass. Use it to catch regressions between builds; a true glass-to-glass number needs a capture card on a real output.
+`expect_changed` measures from the moment the input was sent to the presentation time of the first changed frame, both on the lab's one monotonic clock. Where the backend can (macOS), it tests every frame as it arrives, so a transition is timed from its start, not from when it settles, and the saved frame is the first one that changed. On a virtual screen that is up to the compositor, not the glass. Use it to catch regressions between builds; a true glass-to-glass number needs a capture card on a real output.

@@ -6,6 +6,8 @@
 
 [app]
 name = "My App"
+# macOS: capture only this app's windows, not the desktop or other apps.
+bundle_id = "com.example.myapp"
 # Leave out `launch` if you start the app yourself.
 launch = ["/Applications/My App.app/Contents/MacOS/My App"]
 ready = { tool = "get_version" }

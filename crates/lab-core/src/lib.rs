@@ -10,7 +10,9 @@ pub mod frame;
 pub mod profile;
 pub mod scenario;
 
-pub use backend::{Backend, BackendError, Capture, Displays, ScreenId, ScreenInfo};
+pub use backend::{
+    Backend, BackendError, Capture, Displays, FrameTest, ScreenId, ScreenInfo, WatchId,
+};
 pub use clock::now_ns;
 pub use frame::Frame;
 pub use profile::{Identity, Mode, ModeSpec, Profile, ProfileError, ProfileSet, Timings};
