@@ -72,6 +72,32 @@ pub fn host_display(displays: &[Display]) -> Option<&Display> {
         .or_else(|| displays.first())
 }
 
+/// Another display showing the same picture as `d`. Windows mirrors by
+/// driving two monitors from one desktop source, so both carry one GDI name.
+pub fn mirror_of<'a>(displays: &'a [Display], d: &Display) -> Option<&'a Display> {
+    displays
+        .iter()
+        .find(|o| o.gdi_name == d.gdi_name && o.device_path != d.device_path)
+}
+
+/// The common name of the certificate release drivers are signed with.
+pub const CERT_NAME: &str = "Display Lab driver";
+
+/// Whether a certificate named `name` signs a Display Lab driver: the
+/// release certificate, or one named after it for CI or testing
+/// (`Display Lab driver (CI)`).
+pub fn is_driver_certificate(name: &str) -> bool {
+    name == CERT_NAME
+        || name
+            .strip_prefix(CERT_NAME)
+            .is_some_and(|rest| rest.starts_with(" ("))
+}
+
+/// Bytes as upper-case hex, the way Windows shows a thumbprint.
+pub fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02X}")).collect()
+}
+
 /// The first slot not in `used`.
 pub fn free_slot(used: impl IntoIterator<Item = u8>) -> Option<u8> {
     let used: Vec<u8> = used.into_iter().collect();
@@ -222,6 +248,33 @@ mod tests {
         }
         .find(&displays)
         .is_none());
+    }
+
+    #[test]
+    fn a_mirrored_screen_shares_its_source() {
+        let host = display("host", None, (0, 0));
+        let mut lab = display("lab", Some(2001), (0, 0));
+        let other = Display {
+            gdi_name: r"\\.\DISPLAY6".into(),
+            ..display("other", Some(4001), (1920, 0))
+        };
+        let all = [host.clone(), lab.clone(), other.clone()];
+        assert_eq!(mirror_of(&all, &lab).unwrap().device_path, "host");
+        assert!(mirror_of(&all, &other).is_none());
+
+        lab.gdi_name = r"\\.\DISPLAY5".into();
+        let all = [host, lab.clone(), other];
+        assert!(mirror_of(&all, &lab).is_none());
+    }
+
+    #[test]
+    fn driver_certificates_by_name() {
+        assert!(is_driver_certificate("Display Lab driver"));
+        assert!(is_driver_certificate("Display Lab driver (CI)"));
+        assert!(!is_driver_certificate("Display Lab drivers"));
+        assert!(!is_driver_certificate("Display Lab"));
+        assert!(!is_driver_certificate("Some other driver"));
+        assert_eq!(hex(&[0x6F, 0x1E, 0x03]), "6F1E03");
     }
 
     #[test]

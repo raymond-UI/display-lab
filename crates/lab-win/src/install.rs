@@ -22,11 +22,18 @@ use windows::Win32::Devices::DeviceAndDriverInstallation::{
     SPDRP_HARDWAREID, SP_DEVINFO_DATA,
 };
 use windows::Win32::Foundation::{ERROR_ACCESS_DENIED, HWND};
+use windows::Win32::Security::Cryptography::{
+    CertCloseStore, CertDeleteCertificateFromStore, CertDuplicateCertificateContext,
+    CertEnumCertificatesInStore, CertGetCertificateContextProperty, CertGetNameStringW,
+    CertOpenStore, CERT_CONTEXT, CERT_NAME_SIMPLE_DISPLAY_TYPE, CERT_OPEN_STORE_FLAGS,
+    CERT_QUERY_ENCODING_TYPE, CERT_SHA1_HASH_PROP_ID, CERT_STORE_OPEN_EXISTING_FLAG,
+    CERT_STORE_PROV_SYSTEM_W, CERT_SYSTEM_STORE_LOCAL_MACHINE, HCERTSTORE,
+};
+
+use crate::display::{hex, is_driver_certificate, wide};
 
 /// The hardware id in DisplayLabIdd.inf.
 const HARDWARE_ID: &str = r"Root\DisplayLabIdd";
-/// The common name of the certificate the release driver is signed with.
-const CERT_NAME: &str = "Display Lab driver";
 
 #[derive(Debug, thiserror::Error)]
 pub enum InstallError {
@@ -185,9 +192,9 @@ pub fn uninstall() -> Result<String, InstallError> {
         }
     }
     for store in ["TrustedPublisher", "Root"] {
-        if certutil(&["-delstore", store, CERT_NAME]).is_ok() {
+        for (name, thumbprint) in remove_certificates(store)? {
             done.push(format!(
-                "removed the \"{CERT_NAME}\" certificate from {store}"
+                "removed the \"{name}\" certificate ({thumbprint}) from {store}"
             ));
         }
     }
@@ -195,6 +202,113 @@ pub fn uninstall() -> Result<String, InstallError> {
         done.push("nothing to remove: the driver was not installed".into());
     }
     Ok(done.join("\n"))
+}
+
+/// A machine certificate store, closed when dropped.
+struct Store(HCERTSTORE);
+
+impl Drop for Store {
+    fn drop(&mut self) {
+        // SAFETY: the store came from CertOpenStore and is closed once.
+        let _ = unsafe { CertCloseStore(Some(self.0), 0) };
+    }
+}
+
+fn open_store(name: &str) -> Result<Store, InstallError> {
+    let wide_name = HSTRING::from(name);
+    // SAFETY: the name outlives the call.
+    unsafe {
+        CertOpenStore(
+            CERT_STORE_PROV_SYSTEM_W,
+            CERT_QUERY_ENCODING_TYPE(0),
+            None,
+            CERT_OPEN_STORE_FLAGS(
+                CERT_SYSTEM_STORE_LOCAL_MACHINE | CERT_STORE_OPEN_EXISTING_FLAG.0,
+            ),
+            Some(wide_name.as_ptr().cast()),
+        )
+    }
+    .map(Store)
+    .map_err(|e| from_win(&format!("opening the {name} certificate store"), e))
+}
+
+/// A certificate's simple name (its common name, usually).
+///
+/// # Safety
+/// `cert` is a live certificate context.
+unsafe fn certificate_name(cert: *const CERT_CONTEXT) -> String {
+    let mut buf = [0u16; 256];
+    // SAFETY: the buffer is passed with its length.
+    let n =
+        unsafe { CertGetNameStringW(cert, CERT_NAME_SIMPLE_DISPLAY_TYPE, 0, None, Some(&mut buf)) };
+    wide(&buf[..(n as usize).min(buf.len())])
+}
+
+/// A certificate's SHA-1 thumbprint, as Windows shows it.
+///
+/// # Safety
+/// `cert` is a live certificate context.
+unsafe fn thumbprint(cert: *const CERT_CONTEXT) -> String {
+    let mut hash = [0u8; 20];
+    let mut size = hash.len() as u32;
+    // SAFETY: the buffer holds `size` bytes.
+    let got = unsafe {
+        CertGetCertificateContextProperty(
+            cert,
+            CERT_SHA1_HASH_PROP_ID,
+            Some(hash.as_mut_ptr().cast()),
+            &mut size,
+        )
+    };
+    match got {
+        Ok(()) => hex(&hash[..(size as usize).min(hash.len())]),
+        Err(_) => "no thumbprint".into(),
+    }
+}
+
+/// Delete every Display Lab driver certificate from the machine's `store`.
+/// Returns each one deleted, as (name, thumbprint); nothing is reported that
+/// Windows did not delete.
+fn remove_certificates(store: &str) -> Result<Vec<(String, String)>, InstallError> {
+    let opened = open_store(store)?;
+    let mut ours = vec![];
+    // SAFETY: enumeration frees the context passed back in, so the ones
+    // kept are duplicated; each duplicate is freed by the delete below.
+    unsafe {
+        let mut cert = CertEnumCertificatesInStore(opened.0, None);
+        while !cert.is_null() {
+            let name = certificate_name(cert);
+            if is_driver_certificate(&name) {
+                ours.push((
+                    CertDuplicateCertificateContext(Some(cert)),
+                    name,
+                    thumbprint(cert),
+                ));
+            }
+            cert = CertEnumCertificatesInStore(opened.0, Some(cert));
+        }
+    }
+    let mut removed = vec![];
+    let mut first_error = None;
+    for (cert, name, thumbprint) in ours {
+        // SAFETY: a duplicate this function owns; the delete always frees
+        // it, even when it fails.
+        match unsafe { CertDeleteCertificateFromStore(cert) } {
+            Ok(()) => removed.push((name, thumbprint)),
+            Err(e) => {
+                first_error.get_or_insert_with(|| {
+                    from_win(
+                        &format!("removing the \"{name}\" certificate from {store}"),
+                        e,
+                    )
+                });
+            }
+        }
+    }
+    match first_error {
+        Some(e) => Err(e),
+        None => Ok(removed),
+    }
 }
 
 fn ping() -> Result<String, String> {

@@ -3,8 +3,8 @@
 //! and capture with DXGI Desktop Duplication.
 
 use crate::display::{
-    bgra_to_rgba, edid_key, free_slot, host_display, parse_reply, parse_slots, qpc_to_lab_ns, wide,
-    Display, Locator, PIPE,
+    bgra_to_rgba, edid_key, free_slot, host_display, mirror_of, parse_reply, parse_slots,
+    qpc_to_lab_ns, wide, Display, Locator, PIPE,
 };
 use crate::edid;
 use lab_core::{
@@ -18,11 +18,11 @@ use std::time::{Duration, Instant};
 
 use windows::core::{Interface, HSTRING, PCWSTR};
 use windows::Win32::Devices::Display::{
-    DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes, QueryDisplayConfig,
+    DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes, QueryDisplayConfig, SetDisplayConfig,
     DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
     DISPLAYCONFIG_DEVICE_INFO_HEADER, DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE,
     DISPLAYCONFIG_PATH_INFO, DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME,
-    QDC_ONLY_ACTIVE_PATHS,
+    QDC_ONLY_ACTIVE_PATHS, SDC_APPLY, SDC_TOPOLOGY_EXTEND,
 };
 use windows::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS, HMODULE};
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
@@ -49,6 +49,9 @@ const NOT_INSTALLED: &str = "Display Lab's display driver is not installed, so t
 fn platform(what: &str, e: impl std::fmt::Display) -> BackendError {
     BackendError::Platform(format!("{what}: {e}"))
 }
+
+/// How long Windows gets to stop mirroring a lab screen once asked.
+const MIRROR_GRACE: Duration = Duration::from_secs(5);
 
 fn debug() -> bool {
     std::env::var_os("DISPLAYLAB_DEBUG").is_some()
@@ -244,6 +247,21 @@ fn read_edid(device_path: &str) -> Option<Vec<u8>> {
     })
 }
 
+/// Ask Windows to give every screen its own part of the desktop, as Win+P,
+/// Extend does. Not saved as the user's choice: Windows remembers a layout
+/// per set of monitors, and this set includes a lab screen.
+fn extend() -> Result<(), BackendError> {
+    // SAFETY: no arrays; the flags ask Windows for its own extended layout.
+    let err = unsafe { SetDisplayConfig(None, None, SDC_APPLY | SDC_TOPOLOGY_EXTEND) };
+    if err != 0 {
+        return Err(platform(
+            "asking Windows to extend the desktop",
+            format!("SetDisplayConfig returned {err}"),
+        ));
+    }
+    Ok(())
+}
+
 // ---- the backend ----------------------------------------------------------
 
 struct Entry {
@@ -254,6 +272,70 @@ struct Entry {
     /// What the lab reports: the profile's identity, full name included.
     identity: Identity,
     failed: Option<String>,
+    /// When the lab asked Windows to stop mirroring this screen.
+    extend_asked: Option<Instant>,
+}
+
+impl Entry {
+    /// Whether this screen, found as `d`, shows its own picture. Windows
+    /// can mirror a new screen onto one it already has (a laptop's usual
+    /// choice for its first external screen); then a check on the lab screen
+    /// would judge the other's pixels. False while Windows is still asked to
+    /// extend; an error once it has had its time.
+    fn own_picture(&self, d: &Display, all: &[Display]) -> Result<bool, BackendError> {
+        if self.slot.is_none() {
+            return Ok(true);
+        }
+        let Some(other) = mirror_of(all, d) else {
+            return Ok(true);
+        };
+        match self.extend_asked {
+            Some(at) if at.elapsed() >= MIRROR_GRACE => {
+                let other = other
+                    .identity
+                    .as_ref()
+                    .map(|i| i.name.clone())
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or_else(|| other.gdi_name.clone());
+                Err(BackendError::Platform(format!(
+                    "\"{}\" mirrors {other}: Windows shows one picture on both, so the lab \
+                     cannot check this screen on its own, and Windows kept mirroring when \
+                     asked to extend. Choose Extend with Win+P and run again",
+                    self.identity.name
+                )))
+            }
+            _ => Ok(false),
+        }
+    }
+}
+
+/// The displays, after asking Windows to extend if it newly mirrors a lab
+/// screen. Asked once per screen; `Entry::own_picture` judges the outcome.
+fn unmirrored(registry: &Shared) -> Result<Vec<Display>, BackendError> {
+    let all = displays()?;
+    let ask = {
+        let mut r = lock(registry);
+        let mut ask = false;
+        for e in r.entries.iter_mut().filter(|e| e.slot.is_some()) {
+            let mirrored = e
+                .locator
+                .find(&all)
+                .is_some_and(|d| mirror_of(&all, d).is_some());
+            if mirrored && e.extend_asked.is_none() {
+                e.extend_asked = Some(Instant::now());
+                ask = true;
+            }
+        }
+        ask
+    };
+    if !ask {
+        return Ok(all);
+    }
+    if debug() {
+        eprintln!("[lab-win] Windows mirrors a lab screen; asking it to extend");
+    }
+    extend()?;
+    displays()
 }
 
 #[derive(Default)]
@@ -326,6 +408,7 @@ impl Displays for WinDisplays {
                 ..found
             },
             failed: None,
+            extend_asked: None,
         });
         Ok(lab)
     }
@@ -344,6 +427,7 @@ impl Displays for WinDisplays {
                 locator: Locator::for_identity(&profile.identity),
                 identity: profile.identity.clone(),
                 failed: None,
+                extend_asked: None,
             });
             (lab, slot)
         };
@@ -401,7 +485,7 @@ impl Displays for WinDisplays {
     }
 
     fn screens(&mut self) -> Result<Vec<ScreenInfo>, BackendError> {
-        let all = displays()?;
+        let all = unmirrored(&self.registry)?;
         let r = lock(&self.registry);
         if debug() {
             for d in &all {
@@ -417,24 +501,29 @@ impl Displays for WinDisplays {
                 );
             }
         }
-        Ok(r.entries
-            .iter()
-            .filter_map(|e| {
-                let d = e.locator.find(&all)?;
-                Some(ScreenInfo {
-                    id: e.lab,
-                    identity: e.identity.clone(),
-                    mode: Mode {
-                        width: d.width,
-                        height: d.height,
-                        refresh_hz: d.refresh_hz,
-                        hidpi: false,
-                    },
-                    origin: d.origin,
-                    host: e.slot.is_none(),
-                })
-            })
-            .collect())
+        let mut out = vec![];
+        for e in &r.entries {
+            // A mirrored screen is not on the desktop as itself yet.
+            let Some(d) = e.locator.find(&all) else {
+                continue;
+            };
+            if !e.own_picture(d, &all)? {
+                continue;
+            }
+            out.push(ScreenInfo {
+                id: e.lab,
+                identity: e.identity.clone(),
+                mode: Mode {
+                    width: d.width,
+                    height: d.height,
+                    refresh_hz: d.refresh_hz,
+                    hidpi: false,
+                },
+                origin: d.origin,
+                host: e.slot.is_none(),
+            });
+        }
+        Ok(out)
     }
 
     fn reset(&mut self) -> Result<(), BackendError> {
@@ -675,16 +764,20 @@ impl WinCapture {
 
 impl Capture for WinCapture {
     fn frame(&mut self, id: ScreenId) -> Result<Option<Frame>, BackendError> {
-        let locator = {
+        let all = unmirrored(&self.registry)?;
+        let found = {
             let r = lock(&self.registry);
-            r.entries
-                .iter()
-                .find(|e| e.lab == id)
-                .map(|e| e.locator.clone())
+            match r.entries.iter().find(|e| e.lab == id) {
+                Some(e) => match e.locator.find(&all) {
+                    Some(d) if e.own_picture(d, &all)? => Some(d.clone()),
+                    _ => None,
+                },
+                None => None,
+            }
         };
-        let all = displays()?;
-        let Some(display) = locator.as_ref().and_then(|l| l.find(&all)) else {
-            // Gone, or not on the desktop yet.
+        let Some(display) = found else {
+            // Gone, not on the desktop yet, or still mirroring another
+            // screen: never capture another screen's picture for it.
             self.outputs.remove(&id);
             return Ok(None);
         };

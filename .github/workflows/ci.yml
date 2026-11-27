@@ -168,4 +168,5 @@ jobs:
           name: windows-driver-package
           path: |
             ${{ runner.temp }}/displaylab-idd/package
+            target/debug/displaylab.exe
             out

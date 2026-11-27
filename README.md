@@ -101,12 +101,13 @@ cargo build --release -p displaylab   # target/release/displaylab
   ```powershell
   displaylab driver install     # from the `driver` folder in the release zip
   displaylab driver status
-  displaylab driver uninstall   # removes the driver, its device and its certificate
+  displaylab driver uninstall   # removes the driver, its device and its certificates
   ```
 
   Installing trusts the certificate the driver is signed with, for code signing on that machine; the driver runs in user mode and needs no test mode or reboot.
 - A screen's name on Windows is what its EDID holds: the first 13 characters of the profile's name. The lab still reports the full name, and finds each screen by its manufacturer, product and serial.
 - The lab runs as the signed-in user, in their desktop session. Only that user and administrators can plug screens.
+- A laptop usually mirrors its first external screen. Mirrored screens share one picture, so the lab could judge the laptop's pixels as the lab screen's. When Windows mirrors a lab screen, the lab asks it to extend the desktop, as Win+P, Extend does, and fails the run if the screen is still mirrored 5 seconds later. Windows remembers that layout only for sets of monitors that include a lab screen.
 
 ## macOS notes
 

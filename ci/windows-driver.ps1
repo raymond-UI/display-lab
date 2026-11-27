@@ -106,6 +106,10 @@ public static class LabDesktop {
     static extern bool EnumDisplayDevices(string lpDevice, int iDevNum, ref DISPLAY_DEVICE lpDisplayDevice, int dwFlags);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     static extern bool EnumDisplaySettings(string deviceName, int modeNum, ref DEVMODE devMode);
+    [DllImport("user32.dll")]
+    static extern int SetDisplayConfig(uint paths, IntPtr pathArray, uint modes, IntPtr modeArray, uint flags);
+    // SDC_APPLY | SDC_TOPOLOGY_EXTEND: what Win+P, Extend does.
+    public static int Extend() { return SetDisplayConfig(0, IntPtr.Zero, 0, IntPtr.Zero, 0x80 | 0x4); }
     public static List<string> Screens() {
         var list = new List<string>();
         for (int i = 0; ; i++) {
@@ -153,6 +157,14 @@ Check $up 'the driver answers on its pipe'
 Pipe 'PING'
 Show 'before'
 $baseline = @(Monitors).Count
+$desktopBaseline = @(Desktop).Count
+
+# A screen of this size on the desktop as itself: a device that was not
+# there before. A mirrored screen shares a device with one already there.
+function OwnScreen([string]$size, $before) {
+    @(Desktop | Where-Object { $_.Size -eq $size -and $_.Device -notin $before }).Count -eq 1
+}
+$before = @(Desktop | ForEach-Object Device)
 
 $proj = Pipe "PLUG 0 $(PlugArgs hd-projector)"
 "PLUG 0 hd-projector: $proj"
@@ -160,7 +172,15 @@ Check (WaitFor { @(Monitors | Where-Object Serial -eq '2001').Count -eq 1 }) 'a 
 Show 'after plugging the projector'
 $p0 = Monitors | Where-Object Serial -eq '2001'
 Check ($p0.Name -eq 'Lab HD Projec' -and $p0.Product -match '^0*500$') "it carries the profile's name and product ($($p0.Name), $($p0.Product))"
-Check (WaitFor { @(Desktop | Where-Object Size -eq '1920x1080').Count -eq 1 }) 'it joins the desktop at its 1920x1080'
+$own = WaitFor { OwnScreen '1920x1080' $before } 5
+if (-not $own) {
+    # A laptop mirrors its first external screen; the backend then asks
+    # Windows to extend, and so does this.
+    "Windows mirrors the projector; asking it to extend (SetDisplayConfig: $([LabDesktop]::Extend()))"
+    $own = WaitFor { OwnScreen '1920x1080' $before }
+    Show 'after asking Windows to extend'
+}
+Check $own 'it joins the desktop as its own 1920x1080 screen'
 
 
 $stage = Pipe "PLUG 1 $(PlugArgs stage-monitor)"
@@ -179,17 +199,18 @@ Check ($stageAfter -and $stageAfter.Instance -eq $stageBefore.Instance) 'the sta
 Check (WaitFor { @(Monitors | Where-Object Serial -eq '2002').Count -eq 1 }) 'the spare unit of the same model shows its own serial (2002)'
 Show 'after plugging the spare'
 
+$before = @(Desktop | ForEach-Object Device)
 "PLUG 2 hd-projector 1280x720: $(Pipe "PLUG 2 $(PlugArgs hd-projector 1280x720)")"
-Start-Sleep -Seconds 3
+$own = WaitFor { OwnScreen '1280x720' $before }
 Show 'after plugging the projector at 1280x720'
-Check (@(Desktop | Where-Object Size -eq '1280x720').Count -eq 1) 'a screen comes up in the mode asked for (1280x720)'
+Check $own 'a screen comes up in the mode asked for (1280x720)'
 
 "LIST: $(Pipe 'LIST')"
 Check ((Pipe 'PLUG 1 00 1x1@1') -like 'ERR*') 'a bad request is refused, not crashed on'
 Check ((Pipe 'PING') -like 'OK*') 'the driver still answers after a bad request'
 
 foreach ($slot in 0, 1, 2) { "UNPLUG ${slot}: $(Pipe "UNPLUG $slot")" }
-Check (WaitFor { @(Monitors).Count -eq $baseline -and @(Desktop).Count -eq 1 }) 'unplugging everything leaves the runner as it was'
+Check (WaitFor { @(Monitors).Count -eq $baseline -and @(Desktop).Count -eq $desktopBaseline }) 'unplugging everything leaves the machine as it was'
 Show 'at the end'
 
 "== Driver package"

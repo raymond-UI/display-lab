@@ -32,6 +32,8 @@ displaylab driver uninstall
 
 `install` trusts the package's certificate (Root and TrustedPublisher), creates the `Root\DisplayLabIdd` device and installs the driver on it, the same steps as `devcon install`, then waits for the driver to answer.
 
+`uninstall` removes the device and the driver package, then every certificate named `Display Lab driver` (or `Display Lab driver (...)`, as CI signs with) from both stores. It lists each certificate it removed, by thumbprint.
+
 ## Building and signing
 
 Visual Studio with the Windows Driver Kit:
