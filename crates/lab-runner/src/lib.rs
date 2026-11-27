@@ -159,14 +159,18 @@ impl<'a> Runner<'a> {
                     continue;
                 }
                 let t = Instant::now();
-                let result = run.step(index, step, &mut report.latencies);
+                let mut result = run.step(index, step, &mut report.latencies);
                 failed = result.outcome == Outcome::Fail;
+                let elapsed_ms = t.elapsed().as_millis() as u64;
+                if failed {
+                    run.save_the_rest(index, step.screen(), &mut result);
+                }
                 report.steps.push(StepReport {
                     index,
                     kind: step.kind().into(),
                     label,
                     outcome: result.outcome,
-                    elapsed_ms: t.elapsed().as_millis() as u64,
+                    elapsed_ms,
                     detail: result.detail,
                     artifacts: result.artifacts,
                 });
@@ -329,6 +333,7 @@ impl Run<'_, '_> {
                 .filter(|id| !reported.iter().any(|s| s.id == **id))
                 .count();
             if missing == 0 {
+                self.warm();
                 return Ok(());
             }
             if Instant::now() >= deadline {
@@ -424,7 +429,34 @@ impl Run<'_, '_> {
         self.launched = true;
         // A started app is a new process: capture has to find it again.
         self.runner.capture_app()?;
+        self.warm();
         Ok(StepResult::done())
+    }
+
+    /// Start capturing every plugged screen now, so a check's time is spent
+    /// on the app, not on the backend's first frame (most of a second for a
+    /// large screen on macOS). A screen not reported yet is started by the
+    /// first check that looks at it. Errors surface in that check too.
+    fn warm(&mut self) {
+        let names: Vec<String> = self.plugged.keys().cloned().collect();
+        for name in names {
+            let _ = self.frame(&name);
+        }
+    }
+
+    /// After a failed check, keep what every other screen showed at that
+    /// moment: a picture that went to the wrong screen shows up there.
+    fn save_the_rest(&mut self, index: usize, checked: Option<&str>, out: &mut StepResult) {
+        if self.runner.artifacts.is_none() {
+            return;
+        }
+        let names: Vec<String> = self.plugged.keys().cloned().collect();
+        // The checked screen's own frame is already saved with the verdict.
+        for name in names.into_iter().filter(|n| Some(n.as_str()) != checked) {
+            if let Ok(Some(frame)) = self.frame(&name) {
+                self.save(index, &format!("{name}-meanwhile"), Some(&frame), out);
+            }
+        }
     }
 
     fn input(
@@ -505,12 +537,15 @@ impl Run<'_, '_> {
             .displays
             .plug(&r.profile, &mode)
             .map_err(|e| e.to_string())?;
+        let detail = format!("{} in {mode}", r.profile.name);
         self.plugged.insert(screen.to_string(), id);
+        // Start capture now if the OS already reports it; see `warm`.
+        let _ = self.frame(screen);
         // Deliberately no wait for the OS to report it: a scenario about a
         // projector that wakes late wants to look at the world before then.
         Ok(StepResult {
             outcome: Outcome::Done,
-            detail: Some(format!("{} in {mode}", r.profile.name)),
+            detail: Some(detail),
             artifacts: vec![],
         })
     }

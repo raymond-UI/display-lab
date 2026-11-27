@@ -35,7 +35,7 @@ The first time it touches real screens on a Mac, it asks for the Screen Recordin
 
 The shipped profiles and scenarios are built in: `displaylab scenarios` and `displaylab profiles` list them. Pass a file or a folder to run your own, and `--profiles <folder>` to add your own display profiles.
 
-Each run writes `out/<scenario>/report.md`, `report.json`, and the frame each check judged, pass or fail, plus the expected and diff frames for a failed match. Frames from an earlier run are cleared first. Exit code 0 means every scenario passed, 1 means one failed, and 2 means the lab itself could not run (a bad file, a missing backend, an adapter that would not start).
+Each run writes `out/<scenario>/report.md`, `report.json`, and the frame each check judged, pass or fail, plus the expected and diff frames for a failed match. When a check fails, every other screen's frame at that moment is kept too (`<step>-<screen>-meanwhile.png`), so a picture that went to the wrong screen shows up. Frames from an earlier run are cleared first. Exit code 0 means every scenario passed, 1 means one failed, and 2 means the lab itself could not run (a bad file, a missing backend, an adapter that would not start).
 
 ```sh
 displaylab validate my-scenarios/   # check files without running anything

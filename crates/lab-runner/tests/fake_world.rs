@@ -339,7 +339,14 @@ fn failures_leave_frames_behind() {
     );
     let report = run_with(FakeBugs::default(), &steps, Some(dir.clone()));
     assert_eq!(failed_step(&report), Some(2));
-    let artifact = &report.steps[1].artifacts[0];
-    assert!(dir.join(artifact).is_file(), "{artifact}");
+    let artifacts = &report.steps[1].artifacts;
+    for a in artifacts {
+        assert!(dir.join(a).is_file(), "{a}");
+    }
+    // The checked screen, then every other screen at that moment.
+    assert_eq!(
+        artifacts,
+        &["02-projector-not-blank.png", "02-laptop-meanwhile.png"]
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
