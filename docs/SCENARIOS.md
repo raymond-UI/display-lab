@@ -43,6 +43,8 @@ Unknown fields are errors, so a typo never silently does nothing. `displaylab va
 
 Every expectation polls until it holds or `within_ms` runs out (default 3000).
 
+`expect_content`, `expect_blank` and `expect_changed` ignore marks smaller than one pixel in 2000 (about 1000 pixels on a 1080p screen). The OS draws small marks of its own, such as the macOS screen-recording dot, and those are not the app's picture.
+
 | Step | Fields | Holds when | Needs |
 | --- | --- | --- | --- |
 | `expect_content` | `screen` | Something other than black is on the screen. | |

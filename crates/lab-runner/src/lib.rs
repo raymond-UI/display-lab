@@ -41,7 +41,7 @@ pub struct Runner<'a> {
     pub profiles: &'a ProfileSet,
     /// Named in the report.
     pub backend: String,
-    /// Where failing frames are written. `None` writes nothing.
+    /// Where the frame each check judged is written. `None` writes nothing.
     pub artifacts: Option<PathBuf>,
     /// Where relative reference-image paths in the scenario are resolved
     /// from: normally the scenario file's directory.
@@ -514,7 +514,11 @@ impl Run<'_, '_> {
             Ok(probe)
         })?;
         Ok(match verdict {
-            Ok(()) => StepResult::pass(None),
+            Ok(()) => {
+                let mut out = StepResult::pass(None);
+                self.save(index, &format!("{screen}-{what}"), last.as_ref(), &mut out);
+                out
+            }
             Err(why) => {
                 let mut out = StepResult::fail(why);
                 self.save(
@@ -580,7 +584,9 @@ impl Run<'_, '_> {
                         return Ok(out);
                     }
                 }
-                Ok(StepResult::pass(Some(format!("changed after {ms:.1} ms"))))
+                let mut out = StepResult::pass(Some(format!("changed after {ms:.1} ms")));
+                self.save(index, &format!("{screen}-changed"), Some(&frame), &mut out);
+                Ok(out)
             }
             Err(why) => {
                 let mut out = StepResult::fail(why);
@@ -644,7 +650,13 @@ impl Run<'_, '_> {
             })
         })?;
         Ok(match verdict {
-            Ok(summary) => StepResult::pass(Some(summary)),
+            Ok(summary) => {
+                let mut out = StepResult::pass(Some(summary));
+                if let Some((actual, _, _)) = &last {
+                    self.save(index, &format!("{screen}-actual"), Some(actual), &mut out);
+                }
+                out
+            }
             Err(why) => {
                 let mut out = StepResult::fail(why);
                 if let Some((actual, expected, _)) = &last {
@@ -688,7 +700,11 @@ impl Run<'_, '_> {
             Ok(probe)
         })?;
         Ok(match verdict {
-            Ok(summary) => StepResult::pass(Some(summary)),
+            Ok(summary) => {
+                let mut out = StepResult::pass(Some(summary));
+                self.save(index, &format!("{screen}-actual"), last.as_ref(), &mut out);
+                out
+            }
             Err(why) => {
                 let mut out = StepResult::fail(why);
                 self.save(index, &format!("{screen}-actual"), last.as_ref(), &mut out);

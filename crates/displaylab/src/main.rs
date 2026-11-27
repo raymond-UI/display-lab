@@ -63,7 +63,8 @@ enum Command {
         /// latency=MS. Repeatable.
         #[arg(long = "fake-bug")]
         fake_bugs: Vec<String>,
-        /// Where reports and failing frames go, one folder per scenario.
+        /// Where reports and the frame each check judged go, one folder per
+        /// scenario.
         #[arg(long, default_value = "out")]
         out: PathBuf,
     },
@@ -230,6 +231,7 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
                 let dir = out.join(&scenario.name);
                 std::fs::create_dir_all(&dir)
                     .with_context(|| format!("creating {}", dir.display()))?;
+                clear_old_frames(&dir)?;
                 let report = run_one(
                     backend,
                     adapter.as_deref(),
@@ -509,6 +511,32 @@ fn check_profiles(scenario: &Scenario, profiles: &ProfileSet, path: &Path) -> Re
     Ok(())
 }
 
+/// Remove the frames an earlier run left in a scenario's folder, so every
+/// frame there belongs to this run's report. Only the lab's own names
+/// (`02-projector-content.png`) are touched.
+fn clear_old_frames(dir: &Path) -> Result<()> {
+    let entries = std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))?;
+    for entry in entries {
+        let entry = entry.with_context(|| format!("reading {}", dir.display()))?;
+        let name = entry.file_name();
+        if name.to_str().is_some_and(is_frame_name) && entry.path().is_file() {
+            std::fs::remove_file(entry.path())
+                .with_context(|| format!("removing {}", entry.path().display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// A file name the runner writes frames under: two digits, a dash, `.png`.
+fn is_frame_name(name: &str) -> bool {
+    let b = name.as_bytes();
+    b.len() > 7
+        && b[0].is_ascii_digit()
+        && b[1].is_ascii_digit()
+        && b[2] == b'-'
+        && name.ends_with(".png")
+}
+
 fn write_report(report: &Report, dir: &Path) -> Result<()> {
     let json = serde_json::to_string_pretty(report)?;
     std::fs::write(dir.join("report.json"), json)?;
@@ -574,6 +602,17 @@ fn split_command(command: &str) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_runners_frames_are_cleared() {
+        assert!(is_frame_name("02-projector-content.png"));
+        assert!(is_frame_name("14-host-not-blank.png"));
+        assert!(!is_frame_name("report.md"));
+        assert!(!is_frame_name("reference.png"));
+        assert!(!is_frame_name("2-x.png"));
+        assert!(!is_frame_name("02-.png"));
+        assert!(!is_frame_name("02-projector.jpg"));
+    }
 
     #[test]
     fn splits_commands() {

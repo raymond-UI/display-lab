@@ -10,6 +10,8 @@ mod checks;
 mod compare;
 mod image;
 
-pub use checks::{differs, is_blank, BLANK_LEVEL, CHANGE_TOLERANCE};
+pub use checks::{
+    differs, is_blank, lit_pixels, min_mark_pixels, BLANK_LEVEL, CHANGE_TOLERANCE, MIN_MARK_DIVISOR,
+};
 pub use compare::{compare, diff_image, mean_ssim, Comparison, SizeMismatch, Thresholds};
 pub use image::{decode_png, encode_png, load_png, save_png, ImageError};
