@@ -52,6 +52,10 @@ fn platform(what: &str, e: impl std::fmt::Display) -> BackendError {
 
 /// How long Windows gets to stop mirroring a lab screen once asked.
 const MIRROR_GRACE: Duration = Duration::from_secs(5);
+/// How long a screen is held back once Windows stops mirroring it. Windows
+/// animates the change, and the first frames still show the picture the
+/// screen mirrored.
+const EXTEND_SETTLE: Duration = Duration::from_millis(1500);
 
 fn debug() -> bool {
     std::env::var_os("DISPLAYLAB_DEBUG").is_some()
@@ -274,6 +278,8 @@ struct Entry {
     failed: Option<String>,
     /// When the lab asked Windows to stop mirroring this screen.
     extend_asked: Option<Instant>,
+    /// When the lab first saw it with its own picture after that.
+    own_since: Option<Instant>,
 }
 
 impl Entry {
@@ -281,14 +287,20 @@ impl Entry {
     /// can mirror a new screen onto one it already has (a laptop's usual
     /// choice for its first external screen); then a check on the lab screen
     /// would judge the other's pixels. False while Windows is still asked to
-    /// extend; an error once it has had its time.
-    fn own_picture(&self, d: &Display, all: &[Display]) -> Result<bool, BackendError> {
+    /// extend, and while the change settles; an error once it has had its
+    /// time.
+    fn own_picture(&mut self, d: &Display, all: &[Display]) -> Result<bool, BackendError> {
         if self.slot.is_none() {
             return Ok(true);
         }
         let Some(other) = mirror_of(all, d) else {
-            return Ok(true);
+            if self.extend_asked.is_none() {
+                return Ok(true);
+            }
+            let since = *self.own_since.get_or_insert_with(Instant::now);
+            return Ok(since.elapsed() >= EXTEND_SETTLE);
         };
+        self.own_since = None;
         match self.extend_asked {
             Some(at) if at.elapsed() >= MIRROR_GRACE => {
                 let other = other
@@ -409,6 +421,7 @@ impl Displays for WinDisplays {
             },
             failed: None,
             extend_asked: None,
+            own_since: None,
         });
         Ok(lab)
     }
@@ -428,6 +441,7 @@ impl Displays for WinDisplays {
                 identity: profile.identity.clone(),
                 failed: None,
                 extend_asked: None,
+                own_since: None,
             });
             (lab, slot)
         };
@@ -486,7 +500,7 @@ impl Displays for WinDisplays {
 
     fn screens(&mut self) -> Result<Vec<ScreenInfo>, BackendError> {
         let all = unmirrored(&self.registry)?;
-        let r = lock(&self.registry);
+        let mut r = lock(&self.registry);
         if debug() {
             for d in &all {
                 eprintln!("[lab-win] display {d:?}");
@@ -502,7 +516,7 @@ impl Displays for WinDisplays {
             }
         }
         let mut out = vec![];
-        for e in &r.entries {
+        for e in &mut r.entries {
             // A mirrored screen is not on the desktop as itself yet.
             let Some(d) = e.locator.find(&all) else {
                 continue;
@@ -766,8 +780,8 @@ impl Capture for WinCapture {
     fn frame(&mut self, id: ScreenId) -> Result<Option<Frame>, BackendError> {
         let all = unmirrored(&self.registry)?;
         let found = {
-            let r = lock(&self.registry);
-            match r.entries.iter().find(|e| e.lab == id) {
+            let mut r = lock(&self.registry);
+            match r.entries.iter_mut().find(|e| e.lab == id) {
                 Some(e) => match e.locator.find(&all) {
                     Some(d) if e.own_picture(d, &all)? => Some(d.clone()),
                     _ => None,
