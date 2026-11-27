@@ -27,7 +27,7 @@ pub const DEFAULT_MAX_BAD_FRACTION: f64 = 0.005;
 
 /// Alpha is compared alongside colour rather than ignored: a compositor that
 /// drops an alpha channel would otherwise pass every golden. One 8-bit step of
-/// slack absorbs encoder rounding. Deliberately not a CLI knob — if a fixture
+/// slack absorbs encoder rounding. Deliberately not a CLI knob: if a fixture
 /// ever needs to tune it, add the flag then.
 const MAX_ALPHA_DELTA: u8 = 1;
 
